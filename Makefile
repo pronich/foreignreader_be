@@ -42,8 +42,8 @@ compose-up:
 	docker compose up -d --build
 	@sh -c 'PORT="$${PORT:-8080}"; \
 		echo "started (compose)"; \
-		echo "api: http://localhost:$${PORT}"; \
-		echo "health: http://localhost:$${PORT}/health"; \
+		echo "public: http://localhost:80"; \
+		echo "health: http://localhost:80/health"; \
 		echo "logs: make compose-logs"; \
 		echo "stop: make compose-down"'
 
