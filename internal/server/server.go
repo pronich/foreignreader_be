@@ -8,10 +8,8 @@ import (
 
 func New(cfg config.Config) *http.Server {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	registerOperationalRoutes(mux)
+	registerAPIV1Routes(mux)
 
 	handler := chain(
 		mux,
