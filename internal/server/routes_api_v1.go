@@ -10,11 +10,13 @@ import (
 
 	oai "github.com/openai/openai-go/v2"
 
+	"foreignreader_be/internal/auth"
+	"foreignreader_be/internal/entitlement"
 	"foreignreader_be/internal/translate"
 )
 
-func registerAPIV1Routes(mux *http.ServeMux, tr *translate.Client) {
-	mux.HandleFunc("POST /api/v1/translate/context", func(w http.ResponseWriter, r *http.Request) {
+func registerAPIV1Routes(mux *http.ServeMux, tr *translate.Client, store *auth.Store, issuer *auth.TokenIssuer, ent *entitlement.Store) {
+	translateHandler := func(w http.ResponseWriter, r *http.Request) {
 		ct := r.Header.Get("Content-Type")
 		if ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
 			writeAPIError(w, http.StatusUnsupportedMediaType, "invalid_request", "expected Content-Type: application/json")
@@ -65,7 +67,9 @@ func registerAPIV1Routes(mux *http.ServeMux, tr *translate.Client) {
 			WordTranslation:     word,
 			SentenceTranslation: sentence,
 		})
-	})
+	}
+
+	mux.Handle("POST /api/v1/translate/context", bearerAuthHandler(store, issuer, requireProMiddleware(ent, translateHandler)))
 }
 
 type translateContextRequest struct {
