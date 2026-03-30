@@ -2,18 +2,24 @@ package server
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 
+	"foreignreader_be/internal/auth"
 	"foreignreader_be/internal/config"
 	"foreignreader_be/internal/translate"
 )
 
 func New(cfg config.Config, tr *translate.Client, db *sql.DB) *http.Server {
-	_ = db // reserved for upcoming auth persistence against PostgreSQL
+	store := auth.NewStore(db)
+	issuer, err := auth.NewTokenIssuer(cfg.JWTSecret)
+	if err != nil {
+		log.Fatalf("auth: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	registerOperationalRoutes(mux)
-	registerAuthRoutes(mux)
+	registerAuthRoutes(mux, cfg, store, issuer)
 	registerAPIV1Routes(mux, tr)
 
 	handler := chain(

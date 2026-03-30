@@ -44,6 +44,8 @@ services:
       IDLE_TIMEOUT: "${IDLE_TIMEOUT:-120s}"
       SHUTDOWN_TIMEOUT: "${SHUTDOWN_TIMEOUT:-10s}"
       DATABASE_URL: "${DATABASE_URL_COMPOSE:-postgres://foreignreader:foreignreader@postgres:5432/foreignreader?sslmode=disable}"
+      JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
+      AUTH_DEV_MODE: "${AUTH_DEV_MODE:-false}"
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
       TRANSLATE_CONTEXT_MODEL: "${TRANSLATE_CONTEXT_MODEL:-gpt-5.4-mini}"
       TRANSLATE_CONTEXT_PROMPT_FILE: "/prompts/translate_context.txt"
