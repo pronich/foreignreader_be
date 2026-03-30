@@ -1,0 +1,13 @@
+services:
+  api:
+    build: .
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    environment:
+      PORT: "${PORT:-8080}"
+      APP_ENV: "${APP_ENV:-development}"
+      READ_TIMEOUT: "${READ_TIMEOUT:-5s}"
+      WRITE_TIMEOUT: "${WRITE_TIMEOUT:-10s}"
+      IDLE_TIMEOUT: "${IDLE_TIMEOUT:-60s}"
+      SHUTDOWN_TIMEOUT: "${SHUTDOWN_TIMEOUT:-10s}"
+

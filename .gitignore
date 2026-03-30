@@ -1,0 +1,30 @@
+/bin/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+!.env.template
+
+# credentials / keys / certs
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.kubeconfig
+
+# local runtime artifacts
+*.log
+*.pid
+
+# local docker overrides
+docker-compose.override.yml
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
