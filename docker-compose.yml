@@ -4,10 +4,14 @@ services:
     environment:
       PORT: "8080"
       APP_ENV: "${APP_ENV:-development}"
-      READ_TIMEOUT: "${READ_TIMEOUT:-5s}"
-      WRITE_TIMEOUT: "${WRITE_TIMEOUT:-10s}"
-      IDLE_TIMEOUT: "${IDLE_TIMEOUT:-60s}"
+      READ_TIMEOUT: "${READ_TIMEOUT:-30s}"
+      WRITE_TIMEOUT: "${WRITE_TIMEOUT:-120s}"
+      IDLE_TIMEOUT: "${IDLE_TIMEOUT:-120s}"
       SHUTDOWN_TIMEOUT: "${SHUTDOWN_TIMEOUT:-10s}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      TRANSLATE_CONTEXT_MODEL: "${TRANSLATE_CONTEXT_MODEL:-gpt-5.4-mini}"
+      TRANSLATE_CONTEXT_PROMPT_FILE: "/prompts/translate_context.txt"
+      TRANSLATE_CONTEXT_TIMEOUT: "${TRANSLATE_CONTEXT_TIMEOUT:-15s}"
 
   nginx:
     image: nginx:1.27-alpine

@@ -10,11 +10,13 @@ import (
 
 	"foreignreader_be/internal/config"
 	"foreignreader_be/internal/server"
+	"foreignreader_be/internal/translate"
 )
 
 func main() {
 	cfg := config.Load()
-	srv := server.New(cfg)
+	tr := translate.NewClient(cfg.OpenAIAPIKey, cfg.TranslateModel, cfg.TranslatePromptText, cfg.TranslateTimeout)
+	srv := server.New(cfg, tr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

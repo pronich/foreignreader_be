@@ -6,6 +6,9 @@
 !.env.example
 !.env.template
 
+# Local / secret prompt copy (keep template or docs in repo; see .env.example)
+prompts/translate_context.txt
+
 # credentials / keys / certs
 *.pem
 *.key
