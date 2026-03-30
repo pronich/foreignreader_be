@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -12,6 +13,9 @@ import (
 type Config struct {
 	Port   string
 	AppEnv string
+
+	// DatabaseURL is a PostgreSQL connection string (e.g. postgres://user:pass@host:5432/dbname?sslmode=disable).
+	DatabaseURL string
 
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
@@ -36,6 +40,11 @@ func Load() Config {
 	appEnv := os.Getenv("APP_ENV")
 	if appEnv == "" {
 		appEnv = "development"
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if strings.TrimSpace(databaseURL) == "" {
+		log.Fatal("config: DATABASE_URL is required")
 	}
 
 	key := os.Getenv("OPENAI_API_KEY")
@@ -63,6 +72,8 @@ func Load() Config {
 	return Config{
 		Port:   port,
 		AppEnv: appEnv,
+
+		DatabaseURL: databaseURL,
 
 		// READ_TIMEOUT: time to read the full request (body included).
 		ReadTimeout: getDurationEnv("READ_TIMEOUT", 30*time.Second),

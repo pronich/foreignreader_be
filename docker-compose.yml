@@ -1,6 +1,41 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-foreignreader}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-foreignreader}"
+      POSTGRES_DB: "${POSTGRES_DB:-foreignreader}"
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Matches default POSTGRES_USER / POSTGRES_DB; adjust if you override those in `.env`.
+      test: ["CMD-SHELL", "pg_isready -U foreignreader -d foreignreader"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Runs before `api`: applies SQL migrations (no DB exists at `docker build` time, so this runs on compose up).
+  # Uses DATABASE_URL_COMPOSE so host-only DATABASE_URL (e.g. localhost) does not break in-container networking.
+  migrate:
+    image: migrate/migrate:v4.18.3
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=${DATABASE_URL_COMPOSE:-postgres://foreignreader:foreignreader@postgres:5432/foreignreader?sslmode=disable}"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     environment:
       PORT: "8080"
       APP_ENV: "${APP_ENV:-development}"
@@ -8,6 +43,7 @@ services:
       WRITE_TIMEOUT: "${WRITE_TIMEOUT:-120s}"
       IDLE_TIMEOUT: "${IDLE_TIMEOUT:-120s}"
       SHUTDOWN_TIMEOUT: "${SHUTDOWN_TIMEOUT:-10s}"
+      DATABASE_URL: "${DATABASE_URL_COMPOSE:-postgres://foreignreader:foreignreader@postgres:5432/foreignreader?sslmode=disable}"
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
       TRANSLATE_CONTEXT_MODEL: "${TRANSLATE_CONTEXT_MODEL:-gpt-5.4-mini}"
       TRANSLATE_CONTEXT_PROMPT_FILE: "/prompts/translate_context.txt"
@@ -22,3 +58,5 @@ services:
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
 
+volumes:
+  postgres_data:

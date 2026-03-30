@@ -9,14 +9,26 @@ import (
 	"syscall"
 
 	"foreignreader_be/internal/config"
+	"foreignreader_be/internal/db"
 	"foreignreader_be/internal/server"
 	"foreignreader_be/internal/translate"
 )
 
 func main() {
 	cfg := config.Load()
+
+	sqlDB, err := db.Open(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("database: %v", err)
+	}
+	defer func() {
+		if cerr := sqlDB.Close(); cerr != nil {
+			log.Printf("database close: %v", cerr)
+		}
+	}()
+
 	tr := translate.NewClient(cfg.OpenAIAPIKey, cfg.TranslateModel, cfg.TranslatePromptText, cfg.TranslateTimeout)
-	srv := server.New(cfg, tr)
+	srv := server.New(cfg, tr, sqlDB)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -1,4 +1,4 @@
-.PHONY: dev-build dev dev-run dev-stop dev-logs docker-build docker-run compose-up compose-down compose-logs clean
+.PHONY: dev-build dev dev-run dev-stop dev-logs docker-build docker-run compose-up compose-down compose-logs migrate-up migrate-down db-logs clean
 
 DOCKER_IMAGE ?= foreignreader-be-api:local
 
@@ -42,6 +42,7 @@ compose-up:
 	docker compose up -d --build
 	@sh -c 'PORT="$${PORT:-8080}"; \
 		echo "started (compose)"; \
+		echo "migrations: applied automatically by migrate service before api"; \
 		echo "public: http://localhost:80"; \
 		echo "health: http://localhost:80/health"; \
 		echo "logs: make compose-logs"; \
@@ -52,6 +53,23 @@ compose-down:
 
 compose-logs:
 	docker compose logs -f --tail=200
+
+# Requires golang-migrate CLI: https://github.com/golang-migrate/migrate
+#   brew install golang-migrate
+#   go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+# Loads DATABASE_URL from `.env` when present (same pattern as the app).
+migrate-up:
+	@set -a && [ -f .env ] && . ./.env && set +a; \
+		test -n "$${DATABASE_URL}" || (echo "migrate-up: DATABASE_URL is not set (add it to .env)" && exit 1); \
+		migrate -path migrations -database "$${DATABASE_URL}" up
+
+migrate-down:
+	@set -a && [ -f .env ] && . ./.env && set +a; \
+		test -n "$${DATABASE_URL}" || (echo "migrate-down: DATABASE_URL is not set (add it to .env)" && exit 1); \
+		migrate -path migrations -database "$${DATABASE_URL}" down 1
+
+db-logs:
+	docker compose logs -f --tail=200 postgres
 
 clean:
 	rm -rf ./bin

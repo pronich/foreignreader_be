@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # CA bundle for TLS (needed when copying into scratch; scratch has no system roots)
 RUN apk add --no-cache ca-certificates
