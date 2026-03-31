@@ -22,6 +22,9 @@ type Config struct {
 	// JWTSecret signs backend-issued access tokens (required).
 	JWTSecret string
 
+	// GoogleServerClientID is the OAuth client ID (audience) used to validate Google ID tokens (e.g. iOS server client ID).
+	GoogleServerClientID string
+
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
@@ -59,6 +62,11 @@ func Load() Config {
 
 	authDevMode := parseBoolEnv("AUTH_DEV_MODE", false)
 
+	googleServerClientID := strings.TrimSpace(os.Getenv("GOOGLE_SERVER_CLIENT_ID"))
+	if googleServerClientID == "" {
+		log.Fatal("config: GOOGLE_SERVER_CLIENT_ID is required")
+	}
+
 	key := os.Getenv("OPENAI_API_KEY")
 	if key == "" {
 		log.Fatal("config: OPENAI_API_KEY is required")
@@ -89,6 +97,8 @@ func Load() Config {
 
 		AuthDevMode: authDevMode,
 		JWTSecret:   jwtSecret,
+
+		GoogleServerClientID: googleServerClientID,
 
 		// READ_TIMEOUT: time to read the full request (body included).
 		ReadTimeout: getDurationEnv("READ_TIMEOUT", 30*time.Second),

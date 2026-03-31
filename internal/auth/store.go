@@ -20,6 +20,17 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{DB: db}
 }
 
+// HasIdentity reports whether an auth_identity row exists for provider + provider user id.
+func (s *Store) HasIdentity(ctx context.Context, provider, providerUserID string) (bool, error) {
+	var ok bool
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM auth_identities WHERE provider = $1 AND provider_user_id = $2
+		)
+	`, provider, providerUserID).Scan(&ok)
+	return ok, err
+}
+
 // MockClaimsInput is normalized mock provider data (Apple / Google dev login).
 type MockClaimsInput struct {
 	Sub           string
