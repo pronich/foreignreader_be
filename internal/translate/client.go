@@ -14,6 +14,9 @@ import (
 	"github.com/openai/openai-go/v2/shared"
 )
 
+// openAIRequestTimeout bounds a single OpenAI Responses call (independent of server write timeout).
+const openAIRequestTimeout = 30 * time.Second
+
 // ErrInvalidModelOutput means the model returned text that could not be parsed as the expected JSON.
 var ErrInvalidModelOutput = errors.New("invalid model output")
 
@@ -43,7 +46,11 @@ type llmOutput struct {
 
 // TranslateContext runs one Responses API call and parses the JSON output.
 func (c *Client) TranslateContext(ctx context.Context, sourceLanguage, targetLanguage, sentence, selectedWord string) (wordTranslation, sentenceTranslation string, err error) {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	d := openAIRequestTimeout
+	if c.timeout > 0 && c.timeout < d {
+		d = c.timeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
 
 	input := fmt.Sprintf(
