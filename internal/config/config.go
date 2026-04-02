@@ -30,10 +30,10 @@ type Config struct {
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
 
-	OpenAIAPIKey         string
-	TranslateModel       string
-	TranslatePromptText  string
-	TranslateTimeout     time.Duration
+	OpenAIAPIKey        string
+	TranslateModel      string
+	TranslatePromptText string
+	TranslateTimeout    time.Duration
 }
 
 func Load() Config {
@@ -103,7 +103,7 @@ func Load() Config {
 		// READ_TIMEOUT: time to read the full request (body included).
 		ReadTimeout: getDurationEnv("READ_TIMEOUT", 30*time.Second),
 		// WRITE_TIMEOUT: includes handler execution time; must exceed slow LLM calls (see TRANSLATE_CONTEXT_TIMEOUT).
-		WriteTimeout: getDurationEnv("WRITE_TIMEOUT", 120*time.Second),
+		WriteTimeout:    getDurationEnv("WRITE_TIMEOUT", 120*time.Second),
 		IdleTimeout:     getDurationEnv("IDLE_TIMEOUT", 120*time.Second),
 		ShutdownTimeout: getDurationEnv("SHUTDOWN_TIMEOUT", 10*time.Second),
 
@@ -154,4 +154,3 @@ func getDurationEnv(key string, def time.Duration) time.Duration {
 	}
 	return d
 }
-

@@ -65,4 +65,3 @@ func main() {
 
 	log.Printf("server stopped cleanly")
 }
-

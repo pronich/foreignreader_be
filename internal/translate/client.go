@@ -15,7 +15,7 @@ import (
 )
 
 // openAIRequestTimeout bounds a single OpenAI Responses call (independent of server write timeout).
-const openAIRequestTimeout = 30 * time.Second
+const openAIRequestTimeout = 60 * time.Second
 
 // ErrInvalidModelOutput means the model returned text that could not be parsed as the expected JSON.
 var ErrInvalidModelOutput = errors.New("invalid model output")

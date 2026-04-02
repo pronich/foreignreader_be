@@ -8,4 +8,3 @@ func registerOperationalRoutes(mux *http.ServeMux) {
 		_, _ = w.Write([]byte("ok"))
 	})
 }
-
