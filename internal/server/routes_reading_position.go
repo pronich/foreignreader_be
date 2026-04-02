@@ -53,8 +53,8 @@ type resolveLocalPosition struct {
 }
 
 type resolveReadingPositionRequest struct {
-	BookID        string                `json:"bookId"`
-	LocalPosition *resolveLocalPosition `json:"localPosition,omitempty"`
+	BookFingerprint string                `json:"bookFingerprint"`
+	LocalPosition   *resolveLocalPosition `json:"localPosition,omitempty"`
 }
 
 type remotePositionPublic struct {
@@ -93,10 +93,10 @@ func handleReadingPositionResolve(svc *readingposition.Service) http.HandlerFunc
 			return
 		}
 
-		bookID := strings.TrimSpace(req.BookID)
-		if bookID == "" {
-			log.Printf("reading_position: resolve: request_id=%s reason=missing_book_id", requestIDFromContext(r.Context()))
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "bookId is required")
+		bookFingerprint := strings.TrimSpace(req.BookFingerprint)
+		if bookFingerprint == "" {
+			log.Printf("reading_position: resolve: request_id=%s reason=missing_book_fingerprint", requestIDFromContext(r.Context()))
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "bookFingerprint is required")
 			return
 		}
 
@@ -104,17 +104,17 @@ func handleReadingPositionResolve(svc *readingposition.Service) http.HandlerFunc
 		if req.LocalPosition != nil {
 			lp := req.LocalPosition
 			if strings.TrimSpace(lp.DeviceID) == "" {
-				log.Printf("reading_position: resolve: request_id=%s book_id=%s reason=missing_local_device_id", requestIDFromContext(r.Context()), bookID)
+				log.Printf("reading_position: resolve: request_id=%s book_fingerprint=%s reason=missing_local_device_id", requestIDFromContext(r.Context()), bookFingerprint)
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", "localPosition.deviceId is required")
 				return
 			}
 			if lp.UpdatedAt.IsZero() {
-				log.Printf("reading_position: resolve: request_id=%s book_id=%s reason=missing_local_updated_at", requestIDFromContext(r.Context()), bookID)
+				log.Printf("reading_position: resolve: request_id=%s book_fingerprint=%s reason=missing_local_updated_at", requestIDFromContext(r.Context()), bookFingerprint)
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", "localPosition.updatedAt is required")
 				return
 			}
 			if lp.CharacterOffset != nil && *lp.CharacterOffset < 0 {
-				log.Printf("reading_position: resolve: request_id=%s book_id=%s reason=negative_local_character_offset value=%d", requestIDFromContext(r.Context()), bookID, *lp.CharacterOffset)
+				log.Printf("reading_position: resolve: request_id=%s book_fingerprint=%s reason=negative_local_character_offset value=%d", requestIDFromContext(r.Context()), bookFingerprint, *lp.CharacterOffset)
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", "localPosition.characterOffset must be >= 0")
 				return
 			}
@@ -131,10 +131,10 @@ func handleReadingPositionResolve(svc *readingposition.Service) http.HandlerFunc
 			}
 		}
 
-		res, err := svc.ResolvePosition(r.Context(), u.ID, bookID, local)
+		res, err := svc.ResolvePosition(r.Context(), u.ID, bookFingerprint, local)
 		if err != nil {
-			log.Printf("reading_position: resolve: request_id=%s user_id=%s book_id=%s err=%v",
-				requestIDFromContext(r.Context()), u.ID.String(), bookID, err)
+			log.Printf("reading_position: resolve: request_id=%s user_id=%s book_fingerprint=%s err=%v",
+				requestIDFromContext(r.Context()), u.ID.String(), bookFingerprint, err)
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not resolve reading position")
 			return
 		}
@@ -148,8 +148,8 @@ func handleReadingPositionResolve(svc *readingposition.Service) http.HandlerFunc
 		if res.RemotePosition != nil {
 			remoteUpdatedAt = res.RemotePosition.UpdatedAt.UTC().Format(time.RFC3339Nano)
 		}
-		log.Printf("reading_position: resolve: request_id=%s user_id=%s book_id=%s decision=%s local_updated_at=%s remote_updated_at=%s",
-			rid, u.ID.String(), bookID, res.Decision, localUpdatedAt, remoteUpdatedAt)
+		log.Printf("reading_position: resolve: request_id=%s user_id=%s book_fingerprint=%s decision=%s local_updated_at=%s remote_updated_at=%s",
+			rid, u.ID.String(), bookFingerprint, res.Decision, localUpdatedAt, remoteUpdatedAt)
 
 		out := resolveReadingPositionResponse{Decision: string(res.Decision)}
 		if res.Decision == readingposition.DecisionUseRemote && res.RemotePosition != nil {
@@ -169,7 +169,7 @@ func handleReadingPositionResolve(svc *readingposition.Service) http.HandlerFunc
 }
 
 type saveReadingPositionRequest struct {
-	BookID string `json:"bookId"`
+	BookFingerprint string `json:"bookFingerprint"`
 
 	// Backward/forward compatibility:
 	// - Current: flat fields at root
@@ -218,7 +218,7 @@ func handleReadingPositionSave(svc *readingposition.Service) http.HandlerFunc {
 			return
 		}
 
-		bookID := strings.TrimSpace(req.BookID)
+		bookFingerprint := strings.TrimSpace(req.BookFingerprint)
 		var chapterID string
 		var characterOffset int
 		var progressFraction *float64
@@ -241,28 +241,28 @@ func handleReadingPositionSave(svc *readingposition.Service) http.HandlerFunc {
 
 		chapterID = strings.TrimSpace(chapterID)
 		deviceID = strings.TrimSpace(deviceID)
-		if bookID == "" {
-			log.Printf("reading_position: save: request_id=%s reason=missing_book_id", requestIDFromContext(r.Context()))
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "bookId is required")
+		if bookFingerprint == "" {
+			log.Printf("reading_position: save: request_id=%s reason=missing_book_fingerprint", requestIDFromContext(r.Context()))
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "bookFingerprint is required")
 			return
 		}
 		if chapterID == "" {
-			log.Printf("reading_position: save: request_id=%s book_id=%s reason=missing_chapter_id", requestIDFromContext(r.Context()), bookID)
+			log.Printf("reading_position: save: request_id=%s book_fingerprint=%s reason=missing_chapter_id", requestIDFromContext(r.Context()), bookFingerprint)
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "chapterId is required")
 			return
 		}
 		if characterOffset < 0 {
-			log.Printf("reading_position: save: request_id=%s book_id=%s reason=negative_character_offset value=%d", requestIDFromContext(r.Context()), bookID, characterOffset)
+			log.Printf("reading_position: save: request_id=%s book_fingerprint=%s reason=negative_character_offset value=%d", requestIDFromContext(r.Context()), bookFingerprint, characterOffset)
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "characterOffset must be >= 0")
 			return
 		}
 		if deviceID == "" {
-			log.Printf("reading_position: save: request_id=%s book_id=%s reason=missing_device_id", requestIDFromContext(r.Context()), bookID)
+			log.Printf("reading_position: save: request_id=%s book_fingerprint=%s reason=missing_device_id", requestIDFromContext(r.Context()), bookFingerprint)
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "deviceId is required")
 			return
 		}
 		if updatedAt.IsZero() {
-			log.Printf("reading_position: save: request_id=%s book_id=%s reason=missing_updated_at", requestIDFromContext(r.Context()), bookID)
+			log.Printf("reading_position: save: request_id=%s book_fingerprint=%s reason=missing_updated_at", requestIDFromContext(r.Context()), bookFingerprint)
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "updatedAt is required")
 			return
 		}
@@ -270,7 +270,7 @@ func handleReadingPositionSave(svc *readingposition.Service) http.HandlerFunc {
 		applied, err := svc.SavePosition(
 			r.Context(),
 			u.ID,
-			bookID,
+			bookFingerprint,
 			chapterID,
 			characterOffset,
 			progressFraction,
@@ -282,16 +282,16 @@ func handleReadingPositionSave(svc *readingposition.Service) http.HandlerFunc {
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid reading position")
 				return
 			}
-			log.Printf("reading_position: save: request_id=%s user_id=%s book_id=%s err=%v",
-				requestIDFromContext(r.Context()), u.ID.String(), bookID, err)
+			log.Printf("reading_position: save: request_id=%s user_id=%s book_fingerprint=%s err=%v",
+				requestIDFromContext(r.Context()), u.ID.String(), bookFingerprint, err)
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not save reading position")
 			return
 		}
 
-		log.Printf("reading_position: save: request_id=%s user_id=%s book_id=%s applied=%t incoming_updated_at=%s",
+		log.Printf("reading_position: save: request_id=%s user_id=%s book_fingerprint=%s applied=%t incoming_updated_at=%s",
 			requestIDFromContext(r.Context()),
 			u.ID.String(),
-			bookID,
+			bookFingerprint,
 			applied,
 			updatedAt.UTC().Format(time.RFC3339Nano),
 		)

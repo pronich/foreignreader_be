@@ -6,12 +6,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// Position is the latest synced reading position for one user + one book.
+// Position is the latest synced reading position for one user + one stable book fingerprint.
 // Restore anchor is ChapterID + CharacterOffset. ProgressFraction is metadata only.
 type Position struct {
 	ID               uuid.UUID
 	UserID           uuid.UUID
-	BookID           string
+	BookFingerprint  string
 	ChapterID        string
 	CharacterOffset  int
 	ProgressFraction *float64

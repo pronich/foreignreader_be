@@ -42,16 +42,17 @@ type ResolveResult struct {
 }
 
 // ResolvePosition decides whether the client should use local or remote position on book open.
+// bookFingerprint is the stable cross-device book identity (not a device-local book id).
 // Conflict rule is timestamp-based: if local is newer-or-equal, use local; else use remote.
-func (s *Service) ResolvePosition(ctx context.Context, userID uuid.UUID, bookID string, local *LocalPosition) (ResolveResult, error) {
+func (s *Service) ResolvePosition(ctx context.Context, userID uuid.UUID, bookFingerprint string, local *LocalPosition) (ResolveResult, error) {
 	if userID == uuid.Nil {
 		return ResolveResult{}, ErrUnauthenticated
 	}
-	if bookID == "" {
+	if bookFingerprint == "" {
 		return ResolveResult{}, ErrInvalidArgument
 	}
 
-	remote, err := s.Repo.LatestByUserAndBook(ctx, userID, bookID)
+	remote, err := s.Repo.LatestByUserAndBookFingerprint(ctx, userID, bookFingerprint)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return ResolveResult{Decision: DecisionUseLocal}, nil
@@ -69,11 +70,11 @@ func (s *Service) ResolvePosition(ctx context.Context, userID uuid.UUID, bookID 
 	return ResolveResult{Decision: DecisionUseRemote, RemotePosition: &remote}, nil
 }
 
-// SavePosition upserts the latest position for user+book, but never overwrites newer state.
+// SavePosition upserts the latest position for user+book fingerprint, but never overwrites newer state.
 func (s *Service) SavePosition(
 	ctx context.Context,
 	userID uuid.UUID,
-	bookID string,
+	bookFingerprint string,
 	chapterID string,
 	characterOffset int,
 	progressFraction *float64,
@@ -83,8 +84,8 @@ func (s *Service) SavePosition(
 	if userID == uuid.Nil {
 		return false, ErrUnauthenticated
 	}
-	if bookID == "" || chapterID == "" || deviceID == "" || updatedAt.IsZero() || characterOffset < 0 {
+	if bookFingerprint == "" || chapterID == "" || deviceID == "" || updatedAt.IsZero() || characterOffset < 0 {
 		return false, ErrInvalidArgument
 	}
-	return s.Repo.UpsertLatestByUserAndBook(ctx, userID, bookID, chapterID, characterOffset, progressFraction, deviceID, updatedAt)
+	return s.Repo.UpsertLatestByUserAndBookFingerprint(ctx, userID, bookFingerprint, chapterID, characterOffset, progressFraction, deviceID, updatedAt)
 }

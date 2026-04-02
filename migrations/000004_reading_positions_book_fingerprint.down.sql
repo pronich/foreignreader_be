@@ -1,0 +1,5 @@
+ALTER TABLE reading_positions RENAME CONSTRAINT uq_reading_positions_user_fingerprint TO uq_reading_positions_user_book;
+
+ALTER INDEX idx_reading_positions_user_book_fingerprint RENAME TO idx_reading_positions_user_book;
+
+ALTER TABLE reading_positions RENAME COLUMN book_fingerprint TO book_id;
