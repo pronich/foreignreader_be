@@ -37,7 +37,7 @@ services:
         condition: service_completed_successfully
     environment:
       PORT: "8080"
-      APP_ENV: "${APP_ENV:-production}"
+      APP_ENV: "${APP_ENV:-development}"
       READ_TIMEOUT: "${READ_TIMEOUT:-30s}"
       WRITE_TIMEOUT: "${WRITE_TIMEOUT:-120s}"
       IDLE_TIMEOUT: "${IDLE_TIMEOUT:-120s}"
@@ -59,10 +59,8 @@ services:
         condition: service_healthy
     ports:
       - "80:80"
-      - "443:443"
     volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/default-dev.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
 volumes:
