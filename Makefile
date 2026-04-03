@@ -2,6 +2,8 @@
 
 DOCKER_IMAGE ?= foreignreader-be-api:local
 
+# APP_ENV in .env: production|prod -> docker-compose.yml + nginx/default.conf; else -> docker-compose.dev.yml + nginx/default-dev.conf
+
 dev-build:
 	mkdir -p ./bin
 	go build -o ./bin/app .
@@ -39,7 +41,14 @@ docker-run: docker-build
 	@sh -c 'PORT="$${PORT:-8080}"; docker run --rm -e PORT="$$PORT" -p "$$PORT:$$PORT" $(DOCKER_IMAGE)'
 
 compose-up:
-	docker compose up -d --build
+	@set -a && [ -f .env ] && . ./.env && set +a; \
+		ae="$${APP_ENV:-production}"; \
+		case "$$(echo "$$ae" | tr '[:upper:]' '[:lower:]')" in \
+			production|prod) cf=docker-compose.yml ;; \
+			*) cf=docker-compose.dev.yml ;; \
+		esac; \
+		echo "compose: $$cf (APP_ENV=$$ae)"; \
+		docker compose -f "$$cf" up -d --build
 	@sh -c 'PORT="$${PORT:-8080}"; \
 		echo "started (compose)"; \
 		echo "migrations: applied automatically by migrate service before api"; \
@@ -49,10 +58,22 @@ compose-up:
 		echo "stop: make compose-down"'
 
 compose-down:
-	docker compose down
+	@set -a && [ -f .env ] && . ./.env && set +a; \
+		ae="$${APP_ENV:-production}"; \
+		case "$$(echo "$$ae" | tr '[:upper:]' '[:lower:]')" in \
+			production|prod) cf=docker-compose.yml ;; \
+			*) cf=docker-compose.dev.yml ;; \
+		esac; \
+		docker compose -f "$$cf" down
 
 compose-logs:
-	docker compose logs -f --tail=200
+	@set -a && [ -f .env ] && . ./.env && set +a; \
+		ae="$${APP_ENV:-production}"; \
+		case "$$(echo "$$ae" | tr '[:upper:]' '[:lower:]')" in \
+			production|prod) cf=docker-compose.yml ;; \
+			*) cf=docker-compose.dev.yml ;; \
+		esac; \
+		docker compose -f "$$cf" logs -f --tail=200
 
 # Requires golang-migrate CLI: https://github.com/golang-migrate/migrate
 #   brew install golang-migrate
@@ -69,7 +90,13 @@ migrate-down:
 		migrate -path migrations -database "$${DATABASE_URL}" down 1
 
 db-logs:
-	docker compose logs -f --tail=200 postgres
+	@set -a && [ -f .env ] && . ./.env && set +a; \
+		ae="$${APP_ENV:-production}"; \
+		case "$$(echo "$$ae" | tr '[:upper:]' '[:lower:]')" in \
+			production|prod) cf=docker-compose.yml ;; \
+			*) cf=docker-compose.dev.yml ;; \
+		esac; \
+		docker compose -f "$$cf" logs -f --tail=200 postgres
 
 clean:
 	rm -rf ./bin
