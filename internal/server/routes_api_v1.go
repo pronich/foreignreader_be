@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,12 +13,20 @@ import (
 	oai "github.com/openai/openai-go/v2"
 
 	"foreignreader_be/internal/auth"
+	"foreignreader_be/internal/config"
 	"foreignreader_be/internal/entitlement"
+	"foreignreader_be/internal/monthlycontexttranslation"
 	"foreignreader_be/internal/translate"
 )
 
-func registerAPIV1Routes(mux *http.ServeMux, tr *translate.Client, store *auth.Store, issuer *auth.TokenIssuer, ent *entitlement.Store) {
-	translateHandler := func(w http.ResponseWriter, r *http.Request) {
+func registerAPIV1Routes(mux *http.ServeMux, cfg config.Config, tr *translate.Client, store *auth.Store, issuer *auth.TokenIssuer, ent *entitlement.Store) {
+	authenticatedTranslateHandler := func(w http.ResponseWriter, r *http.Request) {
+		u, ok := auth.UserFromContext(r.Context())
+		if !ok {
+			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing authentication context")
+			return
+		}
+
 		if rejectUnlessJSONContentType(w, r) {
 			return
 		}
@@ -30,63 +39,175 @@ func registerAPIV1Routes(mux *http.ServeMux, tr *translate.Client, store *auth.S
 			return
 		}
 
-		if strings.TrimSpace(req.SourceLanguage) == "" ||
-			strings.TrimSpace(req.TargetLanguage) == "" ||
-			strings.TrimSpace(req.Sentence) == "" ||
-			strings.TrimSpace(req.SelectedWord) == "" {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "missing or empty required fields")
-			return
-		}
-
-		rid := requestIDFromContext(r.Context())
-
-		word, sentence, err := tr.TranslateContext(
-			r.Context(),
-			strings.TrimSpace(req.SourceLanguage),
-			strings.TrimSpace(req.TargetLanguage),
-			strings.TrimSpace(req.Sentence),
-			strings.TrimSpace(req.SelectedWord),
-		)
+		isPro, err := ent.HasActivePro(r.Context(), u.ID)
 		if err != nil {
-			if errors.Is(err, translate.ErrInvalidModelOutput) {
-				log.Printf("translate/context: request_id=%s reason=invalid_model_output err=%v", rid, err)
-				writeAPIError(w, http.StatusInternalServerError, "invalid_model_output", "could not parse model response")
-				return
-			}
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				reason := "context_deadline_exceeded"
-				if errors.Is(err, context.Canceled) {
-					reason = "context_cancelled"
-				}
-				log.Printf("translate/context: request_id=%s reason=%s", rid, reason)
-				writeAPIError(w, http.StatusBadGateway, "translation_failed", "translation request failed")
-				return
-			}
-
-			var apiErr *oai.Error
-			if errors.As(err, &apiErr) {
-				logOpenAITranslateFailure(rid, apiErr, err)
-				clientStatus := mapOpenAIHTTPStatusToClient(apiErr.StatusCode)
-				code, msg := translateClientErrorCodeAndMessage(clientStatus)
-				writeAPIError(w, clientStatus, code, msg)
-				return
-			}
-
-			log.Printf("translate/context: request_id=%s reason=upstream_error err=%v", rid, err)
-			writeAPIError(w, http.StatusBadGateway, "translation_failed", "translation request failed")
+			log.Printf("translate/context: pro check: %v", err)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not verify entitlement")
 			return
 		}
 
-		log.Printf("translate/context: request_id=%s openai_status=200", rid)
+		var periodKey string
+		if !isPro {
+			var ml, uc int
+			periodKey, ml, uc, err = monthlycontexttranslation.EnsureCurrentMonthRow(r.Context(), ent.DB, u.ID, cfg.FreeContextTranslationsPerMonth)
+			if err != nil {
+				log.Printf("translate/context: quota ensure: %v", err)
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not load translation quota")
+				return
+			}
+			rem := ml - uc
+			if rem < 0 {
+				rem = 0
+			}
+			if rem == 0 {
+				writeAPIError(w, http.StatusForbidden, "context_translation_quota_exhausted", "monthly free context translation quota is exhausted")
+				return
+			}
+		}
+
+		word, sentence, runOK := translateContextRun(w, r, tr, req)
+		if !runOK {
+			return
+		}
+
+		var quota *contextQuotaPublic
+		if !isPro {
+			ml, uc, err := monthlycontexttranslation.IncrementUsedCount(r.Context(), ent.DB, u.ID, periodKey)
+			if err != nil {
+				log.Printf("translate/context: quota increment: %v", err)
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not update translation quota")
+				return
+			}
+			rem := ml - uc
+			if rem < 0 {
+				rem = 0
+			}
+			quota = &contextQuotaPublic{
+				MonthlyLimit: ml,
+				UsedCount:    uc,
+				Remaining:    rem,
+				PeriodKey:    periodKey,
+			}
+		}
+
+		log.Printf("translate/context: request_id=%s openai_status=200", requestIDFromContext(r.Context()))
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(translateContextResponse{
 			WordTranslation:     word,
 			SentenceTranslation: sentence,
+			ContextQuota:        quota,
 		})
 	}
 
-	mux.Handle("POST /api/v1/translate/context", bearerAuthHandler(store, issuer, requireProMiddleware(ent, translateHandler)))
+	onboardingTranslateHandler := func(w http.ResponseWriter, r *http.Request) {
+		if rejectUnlessJSONContentType(w, r) {
+			return
+		}
+
+		var req translateContextOnboardingRequest
+		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+			return
+		}
+
+		if cfg.OnboardingContextTranslateToken == "" {
+			writeAPIError(w, http.StatusServiceUnavailable, "not_configured", "onboarding translation is not configured")
+			return
+		}
+
+		tok := strings.TrimSpace(req.OnboardingToken)
+		if tok == "" {
+			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing onboardingToken")
+			return
+		}
+		if !secureTokenEqual(tok, cfg.OnboardingContextTranslateToken) {
+			writeAPIError(w, http.StatusForbidden, "forbidden", "invalid onboardingToken")
+			return
+		}
+
+		serveTranslateContext(w, r, tr, req.translateContextRequest)
+	}
+
+	mux.Handle("POST /api/v1/translate/context", bearerAuthHandler(store, issuer, authenticatedTranslateHandler))
+	mux.Handle("POST /api/v1/onboarding/translate/context", http.HandlerFunc(onboardingTranslateHandler))
+}
+
+func serveTranslateContext(w http.ResponseWriter, r *http.Request, tr *translate.Client, req translateContextRequest) {
+	word, sentence, ok := translateContextRun(w, r, tr, req)
+	if !ok {
+		return
+	}
+
+	log.Printf("translate/context: request_id=%s openai_status=200", requestIDFromContext(r.Context()))
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(translateContextResponse{
+		WordTranslation:     word,
+		SentenceTranslation: sentence,
+	})
+}
+
+// translateContextRun validates input, calls the translation provider, and maps errors to HTTP responses.
+// On success it returns word, sentence, and ok=true (caller writes JSON). On failure it writes the response and returns ok=false.
+func translateContextRun(w http.ResponseWriter, r *http.Request, tr *translate.Client, req translateContextRequest) (word, sentence string, ok bool) {
+	if strings.TrimSpace(req.SourceLanguage) == "" ||
+		strings.TrimSpace(req.TargetLanguage) == "" ||
+		strings.TrimSpace(req.Sentence) == "" ||
+		strings.TrimSpace(req.SelectedWord) == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "missing or empty required fields")
+		return "", "", false
+	}
+
+	rid := requestIDFromContext(r.Context())
+
+	word, sentence, err := tr.TranslateContext(
+		r.Context(),
+		strings.TrimSpace(req.SourceLanguage),
+		strings.TrimSpace(req.TargetLanguage),
+		strings.TrimSpace(req.Sentence),
+		strings.TrimSpace(req.SelectedWord),
+	)
+	if err != nil {
+		if errors.Is(err, translate.ErrInvalidModelOutput) {
+			log.Printf("translate/context: request_id=%s reason=invalid_model_output err=%v", rid, err)
+			writeAPIError(w, http.StatusInternalServerError, "invalid_model_output", "could not parse model response")
+			return "", "", false
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			reason := "context_deadline_exceeded"
+			if errors.Is(err, context.Canceled) {
+				reason = "context_cancelled"
+			}
+			log.Printf("translate/context: request_id=%s reason=%s", rid, reason)
+			writeAPIError(w, http.StatusBadGateway, "translation_failed", "translation request failed")
+			return "", "", false
+		}
+
+		var apiErr *oai.Error
+		if errors.As(err, &apiErr) {
+			logOpenAITranslateFailure(rid, apiErr, err)
+			clientStatus := mapOpenAIHTTPStatusToClient(apiErr.StatusCode)
+			code, msg := translateClientErrorCodeAndMessage(clientStatus)
+			writeAPIError(w, clientStatus, code, msg)
+			return "", "", false
+		}
+
+		log.Printf("translate/context: request_id=%s reason=upstream_error err=%v", rid, err)
+		writeAPIError(w, http.StatusBadGateway, "translation_failed", "translation request failed")
+		return "", "", false
+	}
+
+	return word, sentence, true
+}
+
+func secureTokenEqual(client, server string) bool {
+	if len(client) != len(server) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(client), []byte(server)) == 1
 }
 
 type translateContextRequest struct {
@@ -96,9 +217,15 @@ type translateContextRequest struct {
 	SelectedWord   string `json:"selectedWord"`
 }
 
+type translateContextOnboardingRequest struct {
+	translateContextRequest
+	OnboardingToken string `json:"onboardingToken"`
+}
+
 type translateContextResponse struct {
-	WordTranslation     string `json:"wordTranslation"`
-	SentenceTranslation string `json:"sentenceTranslation"`
+	WordTranslation     string              `json:"wordTranslation"`
+	SentenceTranslation string              `json:"sentenceTranslation"`
+	ContextQuota        *contextQuotaPublic `json:"contextQuota,omitempty"`
 }
 
 func mapOpenAIHTTPStatusToClient(code int) int {

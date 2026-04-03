@@ -13,7 +13,7 @@ import (
 )
 
 func New(cfg config.Config, tr *translate.Client, db *sql.DB) *http.Server {
-	store := auth.NewStore(db)
+	store := auth.NewStore(db, cfg.FreeContextTranslationsPerMonth)
 	issuer, err := auth.NewTokenIssuer(cfg.JWTSecret)
 	if err != nil {
 		log.Fatalf("auth: %v", err)
@@ -26,7 +26,7 @@ func New(cfg config.Config, tr *translate.Client, db *sql.DB) *http.Server {
 	registerOperationalRoutes(mux)
 	registerAuthRoutes(mux, cfg, store, issuer)
 	registerEntitlementRoutes(mux, cfg, store, issuer, entStore)
-	registerAPIV1Routes(mux, tr, store, issuer, entStore)
+	registerAPIV1Routes(mux, cfg, tr, store, issuer, entStore)
 	registerReadingPositionRoutes(mux, store, issuer, entStore, rpSvc)
 
 	handler := chain(
