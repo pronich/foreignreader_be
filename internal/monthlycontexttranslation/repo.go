@@ -39,3 +39,14 @@ func EnsureCurrentMonthRow(ctx context.Context, db *sql.DB, userID uuid.UUID, de
 	}
 	return periodKey, monthlyLimit, usedCount, nil
 }
+
+// IncrementUsedCount increments used_count by 1 for the user's row for periodKey and returns the updated monthly_limit and used_count.
+func IncrementUsedCount(ctx context.Context, db *sql.DB, userID uuid.UUID, periodKey string) (monthlyLimit, usedCount int, err error) {
+	err = db.QueryRowContext(ctx, `
+		UPDATE monthly_context_translation_quotas
+		SET used_count = used_count + 1, updated_at = now()
+		WHERE user_id = $1 AND period_key = $2
+		RETURNING monthly_limit, used_count
+	`, userID, periodKey).Scan(&monthlyLimit, &usedCount)
+	return monthlyLimit, usedCount, err
+}
