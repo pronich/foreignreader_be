@@ -7,17 +7,22 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+
+	"foreignreader_be/internal/monthlycontexttranslation"
 )
 
 // Store performs minimal auth-related persistence.
 type Store struct {
 	DB *sql.DB
+	// FreeContextTranslationsPerMonth is written to monthly_context_translation_quotas when a new user is created.
+	FreeContextTranslationsPerMonth int
 }
 
-func NewStore(db *sql.DB) *Store {
-	return &Store{DB: db}
+func NewStore(db *sql.DB, freeContextTranslationsPerMonth int) *Store {
+	return &Store{DB: db, FreeContextTranslationsPerMonth: freeContextTranslationsPerMonth}
 }
 
 // HasIdentity reports whether an auth_identity row exists for provider + provider user id.
@@ -126,6 +131,11 @@ func (s *Store) insertUserAndIdentity(ctx context.Context, tx *sql.Tx, provider,
 		VALUES ($1, $2, $3, $4, now(), now())
 	`, userID, provider, providerUserID, pe)
 	if err != nil {
+		return uuid.Nil, err
+	}
+
+	periodKey := monthlycontexttranslation.PeriodKeyUTC(time.Now())
+	if err := monthlycontexttranslation.InsertInitial(ctx, tx, userID, periodKey, s.FreeContextTranslationsPerMonth); err != nil {
 		return uuid.Nil, err
 	}
 	return userID, nil

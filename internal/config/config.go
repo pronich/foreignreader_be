@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,9 @@ type Config struct {
 
 	// OnboardingContextTranslateToken is the shared secret clients must send as onboardingToken on the public onboarding context-translation endpoint. Empty disables that route (requests receive 503).
 	OnboardingContextTranslateToken string
+
+	// FreeContextTranslationsPerMonth is the free monthly context-translation allowance for new users (stored as monthly_limit on signup).
+	FreeContextTranslationsPerMonth int
 }
 
 func Load() Config {
@@ -94,6 +98,8 @@ func Load() Config {
 
 	onboardingContextTranslateToken := strings.TrimSpace(os.Getenv("ONBOARDING_CONTEXT_TRANSLATE_TOKEN"))
 
+	freeContextTranslationsPerMonth := parseIntEnvNonNegative("FREE_CONTEXT_TRANSLATIONS_PER_MONTH", 100)
+
 	return Config{
 		Port:   port,
 		AppEnv: appEnv,
@@ -117,6 +123,8 @@ func Load() Config {
 		TranslateTimeout:    translateTimeout,
 
 		OnboardingContextTranslateToken: onboardingContextTranslateToken,
+
+		FreeContextTranslationsPerMonth: freeContextTranslationsPerMonth,
 	}
 }
 
@@ -147,6 +155,18 @@ func parseBoolEnv(key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+func parseIntEnvNonNegative(key string, def int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
+		log.Fatalf("config: %s must be a non-negative integer", key)
+	}
+	return v
 }
 
 func getDurationEnv(key string, def time.Duration) time.Duration {
