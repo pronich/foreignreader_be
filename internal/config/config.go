@@ -100,9 +100,8 @@ func Load() Config {
 
 		GoogleServerClientID: googleServerClientID,
 
-		// READ_TIMEOUT: time to read the full request (body included).
 		ReadTimeout: getDurationEnv("READ_TIMEOUT", 30*time.Second),
-		// WRITE_TIMEOUT: includes handler execution time; must exceed slow LLM calls (see TRANSLATE_CONTEXT_TIMEOUT).
+		// Includes handler time; set above TRANSLATE_CONTEXT_TIMEOUT so the HTTP server does not cut off OpenAI before the translate deadline.
 		WriteTimeout:    getDurationEnv("WRITE_TIMEOUT", 120*time.Second),
 		IdleTimeout:     getDurationEnv("IDLE_TIMEOUT", 120*time.Second),
 		ShutdownTimeout: getDurationEnv("SHUTDOWN_TIMEOUT", 10*time.Second),

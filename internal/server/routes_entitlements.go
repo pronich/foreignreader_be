@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"foreignreader_be/internal/auth"
@@ -88,9 +87,7 @@ func handleDevProPOST(ent *entitlement.Store) http.HandlerFunc {
 			return
 		}
 
-		ct := r.Header.Get("Content-Type")
-		if ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-			writeAPIError(w, http.StatusUnsupportedMediaType, "invalid_request", "expected Content-Type: application/json")
+		if rejectUnlessJSONContentType(w, r) {
 			return
 		}
 

@@ -14,13 +14,8 @@ import (
 	"github.com/openai/openai-go/v2/shared"
 )
 
-// openAIRequestTimeout bounds a single OpenAI Responses call (independent of server write timeout).
-const openAIRequestTimeout = 60 * time.Second
-
-// ErrInvalidModelOutput means the model returned text that could not be parsed as the expected JSON.
 var ErrInvalidModelOutput = errors.New("invalid model output")
 
-// Client calls OpenAI Responses API for contextual translation.
 type Client struct {
 	api          oai.Client
 	model        shared.ResponsesModel
@@ -28,7 +23,6 @@ type Client struct {
 	timeout      time.Duration
 }
 
-// NewClient wires the official OpenAI SDK with config from the application.
 func NewClient(apiKey, model, instructions string, timeout time.Duration) *Client {
 	c := oai.NewClient(option.WithAPIKey(apiKey))
 	return &Client{
@@ -44,13 +38,11 @@ type llmOutput struct {
 	SentenceTranslation string `json:"sentenceTranslation"`
 }
 
-// TranslateContext runs one Responses API call and parses the JSON output.
 func (c *Client) TranslateContext(ctx context.Context, sourceLanguage, targetLanguage, sentence, selectedWord string) (wordTranslation, sentenceTranslation string, err error) {
-	d := openAIRequestTimeout
-	if c.timeout > 0 && c.timeout < d {
-		d = c.timeout
+	if c.timeout <= 0 {
+		return "", "", errors.New("translate: timeout must be positive")
 	}
-	ctx, cancel := context.WithTimeout(ctx, d)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	input := fmt.Sprintf(
@@ -58,7 +50,6 @@ func (c *Client) TranslateContext(ctx context.Context, sourceLanguage, targetLan
 		sourceLanguage, targetLanguage, sentence, selectedWord,
 	)
 
-	// Structured Outputs: force JSON with the exact keys the API returns to clients.
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -103,7 +94,6 @@ func (c *Client) TranslateContext(ctx context.Context, sourceLanguage, targetLan
 	return word, sentence, nil
 }
 
-// collectOutputText prefers SDK aggregation, then walks message content (some models omit output_text type).
 func collectOutputText(resp *responses.Response) string {
 	if resp == nil {
 		return ""
@@ -145,7 +135,6 @@ func parseTranslationJSON(raw string) (word, sentence string, err error) {
 		}
 	}
 
-	// Alternate key shapes (snake_case / synonyms)
 	type alt struct {
 		WordTranslation     string `json:"word_translation"`
 		SentenceTranslation string `json:"sentence_translation"`
@@ -159,7 +148,6 @@ func parseTranslationJSON(raw string) (word, sentence string, err error) {
 		}
 	}
 
-	// Loose map lookup
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(jsonStr), &m); err != nil {
 		return "", "", fmt.Errorf("%w: %v", ErrInvalidModelOutput, err)

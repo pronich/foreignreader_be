@@ -18,14 +18,12 @@ import (
 
 func registerAPIV1Routes(mux *http.ServeMux, tr *translate.Client, store *auth.Store, issuer *auth.TokenIssuer, ent *entitlement.Store) {
 	translateHandler := func(w http.ResponseWriter, r *http.Request) {
-		ct := r.Header.Get("Content-Type")
-		if ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-			writeAPIError(w, http.StatusUnsupportedMediaType, "invalid_request", "expected Content-Type: application/json")
+		if rejectUnlessJSONContentType(w, r) {
 			return
 		}
 
 		var req translateContextRequest
-		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20)) // 1 MiB
+		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
@@ -55,13 +53,12 @@ func registerAPIV1Routes(mux *http.ServeMux, tr *translate.Client, store *auth.S
 				writeAPIError(w, http.StatusInternalServerError, "invalid_model_output", "could not parse model response")
 				return
 			}
-			if errors.Is(err, context.Canceled) {
-				log.Printf("translate/context: request_id=%s reason=context_cancelled", rid)
-				writeAPIError(w, http.StatusBadGateway, "translation_failed", "translation request failed")
-				return
-			}
-			if errors.Is(err, context.DeadlineExceeded) {
-				log.Printf("translate/context: request_id=%s reason=context_deadline_exceeded", rid)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				reason := "context_deadline_exceeded"
+				if errors.Is(err, context.Canceled) {
+					reason = "context_cancelled"
+				}
+				log.Printf("translate/context: request_id=%s reason=%s", rid, reason)
 				writeAPIError(w, http.StatusBadGateway, "translation_failed", "translation request failed")
 				return
 			}

@@ -33,7 +33,6 @@ func registerReadingPositionRoutes(
 		saveHandler,
 	)
 
-	// Backwards-compatible /me-prefixed routes (client may treat it as a user-scoped capability).
 	mux.Handle(
 		"POST /api/v1/me/reading-position/resolve",
 		resolveHandler,
@@ -78,14 +77,12 @@ func handleReadingPositionResolve(svc *readingposition.Service) http.HandlerFunc
 			return
 		}
 
-		ct := r.Header.Get("Content-Type")
-		if ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-			writeAPIError(w, http.StatusUnsupportedMediaType, "invalid_request", "expected Content-Type: application/json")
+		if rejectUnlessJSONContentType(w, r) {
 			return
 		}
 
 		var req resolveReadingPositionRequest
-		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20)) // 1 MiB
+		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
 			log.Printf("reading_position: resolve: request_id=%s reason=json_decode_failed err=%v", requestIDFromContext(r.Context()), err)
@@ -170,10 +167,7 @@ func handleReadingPositionResolve(svc *readingposition.Service) http.HandlerFunc
 
 type saveReadingPositionRequest struct {
 	BookFingerprint string `json:"bookFingerprint"`
-
-	// Backward/forward compatibility:
-	// - Current: flat fields at root
-	// - Some clients: nested under position/Position
+	// Flat root fields or nested `position` (older clients).
 	Position *saveReadingPositionPosition `json:"position,omitempty"`
 
 	ChapterID        string       `json:"chapterId,omitempty"`
@@ -203,14 +197,12 @@ func handleReadingPositionSave(svc *readingposition.Service) http.HandlerFunc {
 			return
 		}
 
-		ct := r.Header.Get("Content-Type")
-		if ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-			writeAPIError(w, http.StatusUnsupportedMediaType, "invalid_request", "expected Content-Type: application/json")
+		if rejectUnlessJSONContentType(w, r) {
 			return
 		}
 
 		var req saveReadingPositionRequest
-		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20)) // 1 MiB
+		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
 			log.Printf("reading_position: save: request_id=%s reason=json_decode_failed err=%v", requestIDFromContext(r.Context()), err)
