@@ -10,10 +10,11 @@ import (
 	"foreignreader_be/internal/auth"
 	"foreignreader_be/internal/config"
 	"foreignreader_be/internal/entitlement"
+	"foreignreader_be/internal/monthlycontexttranslation"
 )
 
 func registerEntitlementRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, ent *entitlement.Store) {
-	mux.Handle("GET /api/v1/me/entitlements", bearerAuthHandler(store, issuer, handleMeEntitlements(ent)))
+	mux.Handle("GET /api/v1/me/entitlements", bearerAuthHandler(store, issuer, handleMeEntitlements(cfg, ent)))
 
 	mux.Handle("POST /api/v1/dev/entitlements/pro", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !cfg.MockAuthAllowed() {
@@ -36,7 +37,21 @@ type entitlementUpdateResponse struct {
 }
 
 type entitlementsListResponse struct {
-	Entitlements []entitlementPublic `json:"entitlements"`
+	Entitlements    []entitlementPublic   `json:"entitlements"`
+	EffectiveAccess effectiveAccessPublic `json:"effectiveAccess"`
+}
+
+type effectiveAccessPublic struct {
+	IsPro        bool                `json:"isPro"`
+	Plan         string              `json:"plan"`
+	ContextQuota *contextQuotaPublic `json:"contextQuota,omitempty"`
+}
+
+type contextQuotaPublic struct {
+	MonthlyLimit int    `json:"monthlyLimit"`
+	UsedCount    int    `json:"usedCount"`
+	Remaining    int    `json:"remaining"`
+	PeriodKey    string `json:"periodKey"`
 }
 
 func entitlementPublicFrom(e entitlement.Entitlement) entitlementPublic {
@@ -52,7 +67,7 @@ func entitlementPublicFrom(e entitlement.Entitlement) entitlementPublic {
 	return out
 }
 
-func handleMeEntitlements(ent *entitlement.Store) http.HandlerFunc {
+func handleMeEntitlements(cfg config.Config, ent *entitlement.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, ok := auth.UserFromContext(r.Context())
 		if !ok {
@@ -69,9 +84,40 @@ func handleMeEntitlements(ent *entitlement.Store) http.HandlerFunc {
 		for _, e := range list {
 			out = append(out, entitlementPublicFrom(e))
 		}
+
+		isPro, err := ent.HasActivePro(r.Context(), u.ID)
+		if err != nil {
+			log.Printf("entitlements: pro check: %v", err)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not load entitlements")
+			return
+		}
+
+		ea := effectiveAccessPublic{IsPro: isPro}
+		if isPro {
+			ea.Plan = "pro"
+		} else {
+			ea.Plan = "free"
+			pk, ml, uc, err := monthlycontexttranslation.EnsureCurrentMonthRow(r.Context(), ent.DB, u.ID, cfg.FreeContextTranslationsPerMonth)
+			if err != nil {
+				log.Printf("entitlements: quota ensure: %v", err)
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not load entitlements")
+				return
+			}
+			rem := ml - uc
+			if rem < 0 {
+				rem = 0
+			}
+			ea.ContextQuota = &contextQuotaPublic{
+				MonthlyLimit: ml,
+				UsedCount:    uc,
+				Remaining:    rem,
+				PeriodKey:    pk,
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(entitlementsListResponse{Entitlements: out})
+		_ = json.NewEncoder(w).Encode(entitlementsListResponse{Entitlements: out, EffectiveAccess: ea})
 	}
 }
 
