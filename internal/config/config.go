@@ -34,6 +34,9 @@ type Config struct {
 	TranslateModel      string
 	TranslatePromptText string
 	TranslateTimeout    time.Duration
+
+	// OnboardingContextTranslateToken is the shared secret clients must send as onboardingToken on the public onboarding context-translation endpoint. Empty disables that route (requests receive 503).
+	OnboardingContextTranslateToken string
 }
 
 func Load() Config {
@@ -89,6 +92,8 @@ func Load() Config {
 
 	translateTimeout := getDurationEnv("TRANSLATE_CONTEXT_TIMEOUT", 15*time.Second)
 
+	onboardingContextTranslateToken := strings.TrimSpace(os.Getenv("ONBOARDING_CONTEXT_TRANSLATE_TOKEN"))
+
 	return Config{
 		Port:   port,
 		AppEnv: appEnv,
@@ -110,6 +115,8 @@ func Load() Config {
 		TranslateModel:      model,
 		TranslatePromptText: promptText,
 		TranslateTimeout:    translateTimeout,
+
+		OnboardingContextTranslateToken: onboardingContextTranslateToken,
 	}
 }
 
