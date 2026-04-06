@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -16,10 +15,12 @@ import (
 	"foreignreader_be/internal/config"
 	"foreignreader_be/internal/entitlement"
 	"foreignreader_be/internal/monthlycontexttranslation"
+	"foreignreader_be/internal/onboardingsession"
+	"foreignreader_be/internal/ratelimit"
 	"foreignreader_be/internal/translate"
 )
 
-func registerAPIV1Routes(mux *http.ServeMux, cfg config.Config, tr *translate.Client, store *auth.Store, issuer *auth.TokenIssuer, ent *entitlement.Store) {
+func registerAPIV1Routes(mux *http.ServeMux, cfg config.Config, tr *translate.Client, store *auth.Store, issuer *auth.TokenIssuer, ent *entitlement.Store, obStore *onboardingsession.Store, sessionWL, translateIPWL, translateTokWL *ratelimit.Window) {
 	authenticatedTranslateHandler := func(w http.ResponseWriter, r *http.Request) {
 		u, ok := auth.UserFromContext(r.Context())
 		if !ok {
@@ -100,39 +101,17 @@ func registerAPIV1Routes(mux *http.ServeMux, cfg config.Config, tr *translate.Cl
 		})
 	}
 
-	onboardingTranslateHandler := func(w http.ResponseWriter, r *http.Request) {
-		if rejectUnlessJSONContentType(w, r) {
-			return
-		}
-
-		var req translateContextOnboardingRequest
-		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&req); err != nil {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
-			return
-		}
-
-		if cfg.OnboardingContextTranslateToken == "" {
-			writeAPIError(w, http.StatusServiceUnavailable, "not_configured", "onboarding translation is not configured")
-			return
-		}
-
-		tok := strings.TrimSpace(req.OnboardingToken)
-		if tok == "" {
-			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing onboardingToken")
-			return
-		}
-		if !secureTokenEqual(tok, cfg.OnboardingContextTranslateToken) {
-			writeAPIError(w, http.StatusForbidden, "forbidden", "invalid onboardingToken")
-			return
-		}
-
-		serveTranslateContext(w, r, tr, req.translateContextRequest)
-	}
-
 	mux.Handle("POST /api/v1/translate/context", bearerAuthHandler(store, issuer, authenticatedTranslateHandler))
-	mux.Handle("POST /api/v1/onboarding/translate/context", http.HandlerFunc(onboardingTranslateHandler))
+
+	sessionH := handleOnboardingSession(cfg, obStore)
+	sessionH = withOnboardingSessionIPRate(sessionWL, cfg.OnboardingSessionRateLimitPerIP, sessionH)
+	mux.Handle("POST /api/v1/onboarding/session", sessionH)
+
+	onboardingTranslateH := handleOnboardingTranslateContext(tr)
+	onboardingTranslateH = withOnboardingTranslateTokenRate(translateTokWL, cfg.OnboardingTranslateRateLimitPerToken, onboardingTranslateH)
+	onboardingTranslateH = onboardingOpaqueBearerMiddleware(obStore, onboardingTranslateH)
+	onboardingTranslateH = withOnboardingTranslateIPRate(translateIPWL, cfg.OnboardingTranslateRateLimitPerIP, onboardingTranslateH)
+	mux.Handle("POST /api/v1/onboarding/translate/context", onboardingTranslateH)
 }
 
 func serveTranslateContext(w http.ResponseWriter, r *http.Request, tr *translate.Client, req translateContextRequest) {
@@ -203,23 +182,11 @@ func translateContextRun(w http.ResponseWriter, r *http.Request, tr *translate.C
 	return word, sentence, true
 }
 
-func secureTokenEqual(client, server string) bool {
-	if len(client) != len(server) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(client), []byte(server)) == 1
-}
-
 type translateContextRequest struct {
 	SourceLanguage string `json:"sourceLanguage"`
 	TargetLanguage string `json:"targetLanguage"`
 	Sentence       string `json:"sentence"`
 	SelectedWord   string `json:"selectedWord"`
-}
-
-type translateContextOnboardingRequest struct {
-	translateContextRequest
-	OnboardingToken string `json:"onboardingToken"`
 }
 
 type translateContextResponse struct {

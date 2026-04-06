@@ -36,8 +36,21 @@ type Config struct {
 	TranslatePromptText string
 	TranslateTimeout    time.Duration
 
-	// OnboardingContextTranslateToken is the shared secret clients must send as onboardingToken on the public onboarding context-translation endpoint. Empty disables that route (requests receive 503).
+	// OnboardingContextTranslateToken is the shared app secret used only to obtain short-lived onboarding access tokens (POST /api/v1/onboarding/session). Empty disables onboarding session + translation routes.
 	OnboardingContextTranslateToken string
+
+	// OnboardingSessionTokenTTL is the lifetime of opaque onboarding access tokens (not JWT).
+	OnboardingSessionTokenTTL time.Duration
+
+	// OnboardingSessionRateLimitPerIP is max POST /onboarding/session requests per client IP per minute.
+	OnboardingSessionRateLimitPerIP int
+	// OnboardingTranslateRateLimitPerIP is max POST /onboarding/translate/context requests per client IP per minute.
+	OnboardingTranslateRateLimitPerIP int
+	// OnboardingTranslateRateLimitPerToken is max translate requests per issued onboarding token per minute.
+	OnboardingTranslateRateLimitPerToken int
+
+	// OnboardingTokenCleanupRetention deletes onboarding_access_tokens rows older than this (expired or revoked).
+	OnboardingTokenCleanupRetention time.Duration
 
 	// FreeContextTranslationsPerMonth is the free monthly context-translation allowance for new users (stored as monthly_limit on signup).
 	FreeContextTranslationsPerMonth int
@@ -100,6 +113,12 @@ func Load() Config {
 
 	freeContextTranslationsPerMonth := parseIntEnvNonNegative("FREE_CONTEXT_TRANSLATIONS_PER_MONTH", 100)
 
+	onboardingSessionTTL := getDurationEnv("ONBOARDING_SESSION_TOKEN_TTL", 15*time.Minute)
+	onboardingSessionRateIP := parseIntEnvWithDefault("ONBOARDING_SESSION_RATE_LIMIT_PER_IP", 30)
+	onboardingTranslateRateIP := parseIntEnvWithDefault("ONBOARDING_TRANSLATE_RATE_LIMIT_PER_IP", 60)
+	onboardingTranslateRateTok := parseIntEnvWithDefault("ONBOARDING_TRANSLATE_RATE_LIMIT_PER_TOKEN", 100)
+	onboardingCleanupRetention := getDurationEnv("ONBOARDING_TOKEN_CLEANUP_RETENTION", 30*24*time.Hour)
+
 	return Config{
 		Port:   port,
 		AppEnv: appEnv,
@@ -123,6 +142,12 @@ func Load() Config {
 		TranslateTimeout:    translateTimeout,
 
 		OnboardingContextTranslateToken: onboardingContextTranslateToken,
+
+		OnboardingSessionTokenTTL:            onboardingSessionTTL,
+		OnboardingSessionRateLimitPerIP:      onboardingSessionRateIP,
+		OnboardingTranslateRateLimitPerIP:    onboardingTranslateRateIP,
+		OnboardingTranslateRateLimitPerToken: onboardingTranslateRateTok,
+		OnboardingTokenCleanupRetention:      onboardingCleanupRetention,
 
 		FreeContextTranslationsPerMonth: freeContextTranslationsPerMonth,
 	}
@@ -155,6 +180,18 @@ func parseBoolEnv(key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+func parseIntEnvWithDefault(key string, def int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
+		return def
+	}
+	return v
 }
 
 func parseIntEnvNonNegative(key string, def int) int {
