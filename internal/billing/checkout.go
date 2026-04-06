@@ -41,6 +41,9 @@ func CreateProCheckoutSession(api *client.API, cfg config.Config, stripeCustomer
 		},
 		Metadata:          meta,
 		ClientReferenceID: stripe.String(userID.String()),
+		SubscriptionData: &stripe.CheckoutSessionSubscriptionDataParams{
+			Metadata: meta,
+		},
 	}
 
 	sess, err := api.CheckoutSessions.New(params)
