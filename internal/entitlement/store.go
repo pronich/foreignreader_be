@@ -52,6 +52,26 @@ func (s *Store) HasActivePro(ctx context.Context, userID uuid.UUID) (bool, error
 	return ok, nil
 }
 
+// ActiveProAccess returns the source and expires_at of the current active Pro entitlement (newest row if several match).
+func (s *Store) ActiveProAccess(ctx context.Context, userID uuid.UUID) (source string, expiresAt sql.NullTime, ok bool, err error) {
+	err = s.DB.QueryRowContext(ctx, `
+		SELECT source, expires_at FROM entitlements
+		WHERE user_id = $1
+		  AND product_code = $2
+		  AND status = 'active'
+		  AND (expires_at IS NULL OR expires_at > now())
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, userID, ProductPro).Scan(&source, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", sql.NullTime{}, false, nil
+	}
+	if err != nil {
+		return "", sql.NullTime{}, false, err
+	}
+	return source, expiresAt, true, nil
+}
+
 // ListByUser returns all entitlements for a user, newest first.
 func (s *Store) ListByUser(ctx context.Context, userID uuid.UUID) ([]Entitlement, error) {
 	rows, err := s.DB.QueryContext(ctx, `

@@ -112,6 +112,10 @@ func registerAPIV1Routes(mux *http.ServeMux, cfg config.Config, tr *translate.Cl
 	onboardingTranslateH = onboardingOpaqueBearerMiddleware(obStore, onboardingTranslateH)
 	onboardingTranslateH = withOnboardingTranslateIPRate(translateIPWL, cfg.OnboardingTranslateRateLimitPerIP, onboardingTranslateH)
 	mux.Handle("POST /api/v1/onboarding/translate/context", onboardingTranslateH)
+
+	mux.Handle("POST /api/v1/billing/checkout-session", bearerAuthHandler(store, issuer, handleBillingCheckoutSession(cfg, ent)))
+	mux.Handle("POST /api/v1/billing/customer-portal", bearerAuthHandler(store, issuer, handleBillingCustomerPortal(cfg, ent)))
+	mux.Handle("POST /api/v1/billing/webhook", handleStripeWebhook(cfg, ent.DB, ent))
 }
 
 func serveTranslateContext(w http.ResponseWriter, r *http.Request, tr *translate.Client, req translateContextRequest) {

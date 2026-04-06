@@ -11,11 +11,13 @@ import (
 	"foreignreader_be/internal/config"
 	"foreignreader_be/internal/db"
 	"foreignreader_be/internal/server"
+	"foreignreader_be/internal/stripeapp"
 	"foreignreader_be/internal/translate"
 )
 
 func main() {
 	cfg := config.Load()
+	stripeapp.Init(cfg.StripeSecretKey)
 
 	sqlDB, err := db.Open(cfg.DatabaseURL)
 	if err != nil {

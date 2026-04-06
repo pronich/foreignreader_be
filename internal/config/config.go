@@ -54,6 +54,15 @@ type Config struct {
 
 	// FreeContextTranslationsPerMonth is the free monthly context-translation allowance for new users (stored as monthly_limit on signup).
 	FreeContextTranslationsPerMonth int
+
+	// StripeSecretKey is the Stripe API secret key (sk_live_... / sk_test_...). Not logged.
+	StripeSecretKey string
+	// StripeWebhookSecret is used to verify Stripe webhook signatures (whsec_...). Not logged.
+	StripeWebhookSecret string
+	// StripePriceIDPro is the Price ID for the Pro product (price_...).
+	StripePriceIDPro string
+	// StripeRedirectURL is where Stripe Checkout returns the user after success/cancel.
+	StripeRedirectURL string
 }
 
 func Load() Config {
@@ -119,6 +128,15 @@ func Load() Config {
 	onboardingTranslateRateTok := parseIntEnvWithDefault("ONBOARDING_TRANSLATE_RATE_LIMIT_PER_TOKEN", 100)
 	onboardingCleanupRetention := getDurationEnv("ONBOARDING_TOKEN_CLEANUP_RETENTION", 30*24*time.Hour)
 
+	stripeSecretKey := strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY"))
+	stripeWebhookSecret := strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET"))
+	stripePriceIDPro := strings.TrimSpace(os.Getenv("STRIPE_PRICE_ID_PRO"))
+	stripeRedirectURL := strings.TrimSpace(os.Getenv("STRIPE_REDIRECT_URL"))
+	if stripeRedirectURL == "" {
+		stripeRedirectURL = "https://foreignreader.io/cabinet"
+	}
+	validateStripeRequired(stripeSecretKey, stripeWebhookSecret, stripePriceIDPro)
+
 	return Config{
 		Port:   port,
 		AppEnv: appEnv,
@@ -150,6 +168,11 @@ func Load() Config {
 		OnboardingTokenCleanupRetention:      onboardingCleanupRetention,
 
 		FreeContextTranslationsPerMonth: freeContextTranslationsPerMonth,
+
+		StripeSecretKey:     stripeSecretKey,
+		StripeWebhookSecret: stripeWebhookSecret,
+		StripePriceIDPro:    stripePriceIDPro,
+		StripeRedirectURL:   stripeRedirectURL,
 	}
 }
 
@@ -204,6 +227,22 @@ func parseIntEnvNonNegative(key string, def int) int {
 		log.Fatalf("config: %s must be a non-negative integer", key)
 	}
 	return v
+}
+
+func validateStripeRequired(secretKey, webhookSecret, priceIDPro string) {
+	var missing []string
+	if secretKey == "" {
+		missing = append(missing, "STRIPE_SECRET_KEY")
+	}
+	if webhookSecret == "" {
+		missing = append(missing, "STRIPE_WEBHOOK_SECRET")
+	}
+	if priceIDPro == "" {
+		missing = append(missing, "STRIPE_PRICE_ID_PRO")
+	}
+	if len(missing) > 0 {
+		log.Fatalf("config: Stripe variables required: %s", strings.Join(missing, ", "))
+	}
 }
 
 func getDurationEnv(key string, def time.Duration) time.Duration {

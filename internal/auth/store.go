@@ -48,19 +48,22 @@ type MockClaimsInput struct {
 // UserByID loads a user by primary key.
 func (s *Store) UserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	row := s.DB.QueryRowContext(ctx, `
-		SELECT id, display_name, avatar_url, email, email_verified
+		SELECT id, display_name, avatar_url, email, email_verified, app_storefront, app_storefront_updated_at
 		FROM users
 		WHERE id = $1
 	`, id)
 	var u User
-	var dn, av, em sql.NullString
-	err := row.Scan(&u.ID, &dn, &av, &em, &u.EmailVerified)
+	var dn, av, em, as sql.NullString
+	var asu sql.NullTime
+	err := row.Scan(&u.ID, &dn, &av, &em, &u.EmailVerified, &as, &asu)
 	if err != nil {
 		return User{}, err
 	}
 	u.DisplayName = dn
 	u.AvatarURL = av
 	u.Email = em
+	u.AppStorefront = as
+	u.AppStorefrontUpdatedAt = asu
 	return u, nil
 }
 
@@ -103,6 +106,46 @@ func (s *Store) LoginOrRegisterMock(ctx context.Context, provider string, in *Mo
 		if err := s.mergeIdentityEmail(ctx, tx, provider, sub, in); err != nil {
 			return User{}, err
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return User{}, err
+	}
+	return s.UserByID(ctx, userID)
+}
+
+// LoginExistingByIdentity finds a user by provider identity, merges profile fields, and never creates users.
+func (s *Store) LoginExistingByIdentity(ctx context.Context, provider string, in *MockClaimsInput) (User, error) {
+	if s.DB == nil {
+		return User{}, errors.New("database not configured")
+	}
+	sub := strings.TrimSpace(in.Sub)
+	if sub == "" {
+		return User{}, errors.New("empty provider subject")
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return User{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var userID uuid.UUID
+	err = tx.QueryRowContext(ctx, `
+		SELECT u.id
+		FROM auth_identities ai
+		JOIN users u ON u.id = ai.user_id
+		WHERE ai.provider = $1 AND ai.provider_user_id = $2
+	`, provider, sub).Scan(&userID)
+	if err != nil {
+		return User{}, err
+	}
+
+	if err := s.mergeUser(ctx, tx, userID, in); err != nil {
+		return User{}, err
+	}
+	if err := s.mergeIdentityEmail(ctx, tx, provider, sub, in); err != nil {
+		return User{}, err
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -8,6 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.1
 	github.com/joho/godotenv v1.5.1
 	github.com/openai/openai-go/v2 v2.7.1
+	github.com/stripe/stripe-go/v81 v81.4.0
 	google.golang.org/api v0.273.0
 )
 

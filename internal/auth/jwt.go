@@ -24,12 +24,20 @@ func NewTokenIssuer(secret string) (*TokenIssuer, error) {
 }
 
 // AccessClaims is the payload for backend-issued access tokens.
+// Mobile app tokens omit token_type and channel (legacy shape). Web cabinet tokens set token_type=web and channel=web.
 type AccessClaims struct {
-	Provider string `json:"provider"`
+	Provider   string `json:"provider"`
+	TokenType  string `json:"token_type,omitempty"`
+	Channel    string `json:"channel,omitempty"`
 	jwt.RegisteredClaims
 }
 
-// IssueAccessToken creates a signed JWT with subject = internal user id and provider claim.
+const (
+	TokenTypeApp = "app"
+	TokenTypeWeb = "web"
+)
+
+// IssueAccessToken creates a signed JWT with subject = internal user id and provider claim (mobile app; 24h).
 func (t *TokenIssuer) IssueAccessToken(userID uuid.UUID, provider string) (string, error) {
 	now := time.Now()
 	claims := AccessClaims{
@@ -38,6 +46,23 @@ func (t *TokenIssuer) IssueAccessToken(userID uuid.UUID, provider string) (strin
 			Subject:   userID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return tok.SignedString(t.secret)
+}
+
+// IssueWebAccessToken issues a short-lived JWT for the web cabinet (8h), distinct from app tokens via claims.
+func (t *TokenIssuer) IssueWebAccessToken(userID uuid.UUID, provider string) (string, error) {
+	now := time.Now()
+	claims := AccessClaims{
+		Provider:  provider,
+		TokenType: TokenTypeWeb,
+		Channel:   TokenTypeWeb,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID.String(),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(8 * time.Hour)),
 		},
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -61,6 +86,17 @@ func (t *TokenIssuer) ParseAccessToken(tokenString string) (userID uuid.UUID, pr
 	}
 	if strings.TrimSpace(claims.Subject) == "" || strings.TrimSpace(claims.Provider) == "" {
 		return uuid.Nil, "", errors.New("missing subject or provider")
+	}
+	tt := strings.TrimSpace(claims.TokenType)
+	switch tt {
+	case "", TokenTypeApp:
+		// Legacy app tokens have no token_type; treat empty as app.
+	case TokenTypeWeb:
+		if strings.TrimSpace(claims.Channel) != TokenTypeWeb {
+			return uuid.Nil, "", errors.New("invalid web token channel")
+		}
+	default:
+		return uuid.Nil, "", fmt.Errorf("unsupported token_type: %s", tt)
 	}
 	uid, err := uuid.Parse(strings.TrimSpace(claims.Subject))
 	if err != nil {
