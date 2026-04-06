@@ -135,7 +135,7 @@ func Load() Config {
 	if stripeRedirectURL == "" {
 		stripeRedirectURL = "https://foreignreader.io/cabinet"
 	}
-	validateStripeForNonDev(appEnv, stripeSecretKey, stripeWebhookSecret, stripePriceIDPro)
+	validateStripeRequired(stripeSecretKey, stripeWebhookSecret, stripePriceIDPro)
 
 	return Config{
 		Port:   port,
@@ -229,19 +229,7 @@ func parseIntEnvNonNegative(key string, def int) int {
 	return v
 }
 
-func isDevelopmentLikeEnv(appEnv string) bool {
-	switch strings.ToLower(strings.TrimSpace(appEnv)) {
-	case "development", "dev", "local":
-		return true
-	default:
-		return false
-	}
-}
-
-func validateStripeForNonDev(appEnv, secretKey, webhookSecret, priceIDPro string) {
-	if isDevelopmentLikeEnv(appEnv) {
-		return
-	}
+func validateStripeRequired(secretKey, webhookSecret, priceIDPro string) {
 	var missing []string
 	if secretKey == "" {
 		missing = append(missing, "STRIPE_SECRET_KEY")
@@ -253,7 +241,7 @@ func validateStripeForNonDev(appEnv, secretKey, webhookSecret, priceIDPro string
 		missing = append(missing, "STRIPE_PRICE_ID_PRO")
 	}
 	if len(missing) > 0 {
-		log.Fatalf("config: Stripe variables required when APP_ENV=%s: %s", appEnv, strings.Join(missing, ", "))
+		log.Fatalf("config: Stripe variables required: %s", strings.Join(missing, ", "))
 	}
 }
 

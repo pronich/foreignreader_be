@@ -159,10 +159,38 @@ func resolveUserForSubscription(ctx context.Context, db *sql.DB, sub *stripe.Sub
 	return u, true
 }
 
+// stripeSubscriptionPeriodEnd returns when the current paid period ends. Prefer CurrentPeriodEnd;
+// if missing (some payloads), fall back to CancelAt when cancel_at_period_end is set — both match
+// the end of the billing period for "cancel at period end".
+func stripeSubscriptionPeriodEnd(sub *stripe.Subscription) int64 {
+	if sub == nil {
+		return 0
+	}
+	if sub.CurrentPeriodEnd > 0 {
+		return sub.CurrentPeriodEnd
+	}
+	if sub.CancelAtPeriodEnd && sub.CancelAt > 0 {
+		return sub.CancelAt
+	}
+	return 0
+}
+
 func subscriptionProAccess(sub *stripe.Subscription) (grant bool, expiresAt sql.NullTime) {
 	switch sub.Status {
 	case stripe.SubscriptionStatusActive, stripe.SubscriptionStatusTrialing:
-		if sub.CancelAtPeriodEnd && sub.CurrentPeriodEnd > 0 {
+		// Cancel at period end: Stripe keeps status "active" until the period ends; we grant Pro until
+		// that moment (expires_at), then the next webhook (or period expiry) revokes.
+		if sub.CancelAtPeriodEnd {
+			end := stripeSubscriptionPeriodEnd(sub)
+			if end > 0 {
+				t := time.Unix(end, 0).UTC()
+				return true, sql.NullTime{Time: t, Valid: true}
+			}
+			log.Printf("billing: cancel_at_period_end but no period end timestamp subscription_id=%s", sub.ID)
+			return true, sql.NullTime{}
+		}
+		// Normal active subscription: store current period end so clients can show renewal / access-through date.
+		if sub.CurrentPeriodEnd > 0 {
 			t := time.Unix(sub.CurrentPeriodEnd, 0).UTC()
 			return true, sql.NullTime{Time: t, Valid: true}
 		}

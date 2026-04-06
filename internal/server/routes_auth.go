@@ -11,7 +11,6 @@ import (
 
 	"foreignreader_be/internal/auth"
 	"foreignreader_be/internal/config"
-
 	"google.golang.org/api/idtoken"
 )
 
