@@ -111,6 +111,46 @@ func (s *Store) LoginOrRegisterMock(ctx context.Context, provider string, in *Mo
 	return s.UserByID(ctx, userID)
 }
 
+// LoginExistingByIdentity finds a user by provider identity, merges profile fields, and never creates users.
+func (s *Store) LoginExistingByIdentity(ctx context.Context, provider string, in *MockClaimsInput) (User, error) {
+	if s.DB == nil {
+		return User{}, errors.New("database not configured")
+	}
+	sub := strings.TrimSpace(in.Sub)
+	if sub == "" {
+		return User{}, errors.New("empty provider subject")
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return User{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var userID uuid.UUID
+	err = tx.QueryRowContext(ctx, `
+		SELECT u.id
+		FROM auth_identities ai
+		JOIN users u ON u.id = ai.user_id
+		WHERE ai.provider = $1 AND ai.provider_user_id = $2
+	`, provider, sub).Scan(&userID)
+	if err != nil {
+		return User{}, err
+	}
+
+	if err := s.mergeUser(ctx, tx, userID, in); err != nil {
+		return User{}, err
+	}
+	if err := s.mergeIdentityEmail(ctx, tx, provider, sub, in); err != nil {
+		return User{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return User{}, err
+	}
+	return s.UserByID(ctx, userID)
+}
+
 func (s *Store) insertUserAndIdentity(ctx context.Context, tx *sql.Tx, provider, providerUserID string, in *MockClaimsInput) (uuid.UUID, error) {
 	dn, av, em := sqlNullStringsFromMock(in)
 	ev := emailVerifiedForInsert(in)
