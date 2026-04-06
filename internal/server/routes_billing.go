@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log"
@@ -81,4 +82,61 @@ func handleBillingCheckoutSession(cfg config.Config, ent *entitlement.Store) htt
 type billingCheckoutSessionResponse struct {
 	CheckoutURL string `json:"checkoutUrl"`
 	SessionID   string `json:"sessionId"`
+}
+
+func handleBillingCustomerPortal(cfg config.Config, ent *entitlement.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u, ok := auth.UserFromContext(r.Context())
+		if !ok {
+			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing authentication context")
+			return
+		}
+
+		api := stripeapp.Client()
+		if api == nil {
+			writeAPIError(w, http.StatusServiceUnavailable, "billing_unavailable", "Stripe billing is not configured")
+			return
+		}
+
+		stripeCustomerID, err := billing.LookupStripeCustomerID(r.Context(), ent.DB, u.ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("billing: customer portal user_id=%s stripe_customer=missing", u.ID)
+			writeAPIError(w, http.StatusNotFound, "no_stripe_billing", "No Stripe billing profile linked to this account")
+			return
+		}
+		if err != nil {
+			log.Printf("billing: customer portal user_id=%s stripe_customer=lookup err=%v", u.ID, err)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not load billing profile")
+			return
+		}
+		log.Printf("billing: customer portal user_id=%s stripe_customer_id=%s", u.ID, stripeCustomerID)
+
+		portalURL, sessionID, err := billing.CreateCustomerPortalSession(api, cfg, stripeCustomerID)
+		if err != nil {
+			log.Printf("billing: customer portal user_id=%s err=%v", u.ID, err)
+			var se *stripe.Error
+			if errors.As(err, &se) {
+				log.Printf("billing: stripe error user_id=%s op=customer_portal code=%s type=%s status=%d request_id=%s msg=%s",
+					u.ID, se.Code, se.Type, se.HTTPStatusCode, se.RequestID, se.Msg)
+				writeAPIError(w, http.StatusBadGateway, "stripe_error", "could not create customer portal session")
+				return
+			}
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not create customer portal session")
+			return
+		}
+
+		log.Printf("billing: customer portal session created user_id=%s session_id=%s", u.ID, sessionID)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(billingCustomerPortalResponse{
+			PortalURL: portalURL,
+			SessionID: sessionID,
+		})
+	}
+}
+
+type billingCustomerPortalResponse struct {
+	PortalURL string `json:"portalUrl"`
+	SessionID string `json:"sessionId"`
 }

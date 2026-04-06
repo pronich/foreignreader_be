@@ -10,9 +10,20 @@ import (
 
 	"foreignreader_be/internal/auth"
 
+	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v81"
 	"github.com/stripe/stripe-go/v81/client"
 )
+
+// LookupStripeCustomerID returns the mapped Stripe customer id, or sql.ErrNoRows if none.
+func LookupStripeCustomerID(ctx context.Context, db *sql.DB, userID uuid.UUID) (string, error) {
+	var cid string
+	err := db.QueryRowContext(ctx, `SELECT stripe_customer_id FROM stripe_customers WHERE user_id = $1`, userID).Scan(&cid)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(cid), nil
+}
 
 // EnsureStripeCustomerID returns the Stripe customer id for the user, creating the
 // Stripe customer and DB row on first use. Concurrent requests are safe: at most one
