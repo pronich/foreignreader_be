@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"foreignreader_be/internal/auth"
 	"foreignreader_be/internal/config"
@@ -45,11 +46,13 @@ type googleAuthRequest struct {
 }
 
 type userPublic struct {
-	ID            string  `json:"id"`
-	DisplayName   *string `json:"displayName"`
-	AvatarURL     *string `json:"avatarUrl"`
-	Email         *string `json:"email"`
-	EmailVerified bool    `json:"emailVerified"`
+	ID                      string     `json:"id"`
+	DisplayName             *string    `json:"displayName"`
+	AvatarURL               *string    `json:"avatarUrl"`
+	Email                   *string    `json:"email"`
+	EmailVerified           bool       `json:"emailVerified"`
+	AppStorefront           *string    `json:"appStorefront"`
+	AppStorefrontUpdatedAt  *time.Time `json:"appStorefrontUpdatedAt"`
 }
 
 type authLoginResponse struct {
@@ -409,6 +412,14 @@ func userPublicFromAuth(u auth.User) userPublic {
 	if u.Email.Valid {
 		s := u.Email.String
 		out.Email = &s
+	}
+	if u.AppStorefront.Valid {
+		s := u.AppStorefront.String
+		out.AppStorefront = &s
+	}
+	if u.AppStorefrontUpdatedAt.Valid {
+		t := u.AppStorefrontUpdatedAt.Time.UTC()
+		out.AppStorefrontUpdatedAt = &t
 	}
 	return out
 }

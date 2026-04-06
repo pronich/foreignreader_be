@@ -36,6 +36,7 @@ func New(cfg config.Config, tr *translate.Client, db *sql.DB) *http.Server {
 	registerAuthRoutes(mux, cfg, store, issuer)
 	registerEntitlementRoutes(mux, cfg, store, issuer, entStore)
 	registerAPIV1Routes(mux, cfg, tr, store, issuer, entStore, obStore, sessionWL, translateIPWL, translateTokWL)
+	registerUserRoutes(mux, store, issuer)
 	registerReadingPositionRoutes(mux, store, issuer, entStore, rpSvc)
 
 	handler := chain(

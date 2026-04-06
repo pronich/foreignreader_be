@@ -48,19 +48,22 @@ type MockClaimsInput struct {
 // UserByID loads a user by primary key.
 func (s *Store) UserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	row := s.DB.QueryRowContext(ctx, `
-		SELECT id, display_name, avatar_url, email, email_verified
+		SELECT id, display_name, avatar_url, email, email_verified, app_storefront, app_storefront_updated_at
 		FROM users
 		WHERE id = $1
 	`, id)
 	var u User
-	var dn, av, em sql.NullString
-	err := row.Scan(&u.ID, &dn, &av, &em, &u.EmailVerified)
+	var dn, av, em, as sql.NullString
+	var asu sql.NullTime
+	err := row.Scan(&u.ID, &dn, &av, &em, &u.EmailVerified, &as, &asu)
 	if err != nil {
 		return User{}, err
 	}
 	u.DisplayName = dn
 	u.AvatarURL = av
 	u.Email = em
+	u.AppStorefront = as
+	u.AppStorefrontUpdatedAt = asu
 	return u, nil
 }
 
