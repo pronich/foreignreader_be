@@ -128,33 +128,41 @@ func handleAppleWebCallback(cfg config.Config, store *auth.Store, issuer *auth.T
 	}
 }
 
-// respondAppleWebCallback writes JSON (same envelope as /api/v1/auth/*) or redirects to APPLE_WEB_LOGIN_LANDING_URL with query params.
+// respondAppleWebCallback writes JSON (same envelope as /api/v1/auth/*), or redirects:
+//   - success → APPLE_WEB_SUCCESS_REDIRECT_URL (accessToken, tokenType, userId)
+//   - web_account_required → APPLE_WEB_ACCOUNT_REQUIRED_REDIRECT_URL (error_code, error_message)
 func respondAppleWebCallback(w http.ResponseWriter, r *http.Request, cfg config.Config, success *authLoginResponse, errStatus int, errCode, errMsg string) {
-	landing := strings.TrimSpace(cfg.AppleWebLoginLandingURL)
-	if landing != "" {
-		u, err := url.Parse(landing)
-		if err == nil && u.Scheme != "" && u.Host != "" {
-			q := u.Query()
-			if success != nil {
+	if success != nil {
+		if dest := strings.TrimSpace(cfg.AppleWebSuccessRedirectURL); dest != "" {
+			if u, err := url.Parse(dest); err == nil && u.Scheme != "" && u.Host != "" {
+				q := u.Query()
 				q.Set("accessToken", success.AccessToken)
 				q.Set("tokenType", success.TokenType)
 				q.Set("userId", success.User.ID)
-			} else {
-				q.Set("error_code", errCode)
-				q.Set("error_message", errMsg)
+				u.RawQuery = q.Encode()
+				log.Printf("auth: apple_web action=redirect outcome=success host=%s", u.Host)
+				http.Redirect(w, r, u.String(), http.StatusFound)
+				return
 			}
-			u.RawQuery = q.Encode()
-			log.Printf("auth: apple_web action=redirect host=%s success=%t", u.Host, success != nil)
-			http.Redirect(w, r, u.String(), http.StatusFound)
-			return
 		}
-	}
-
-	if success != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(success)
 		return
+	}
+
+	if errCode == "web_account_required" {
+		if dest := strings.TrimSpace(cfg.AppleWebAccountRequiredRedirectURL); dest != "" {
+			if u, err := url.Parse(dest); err == nil && u.Scheme != "" && u.Host != "" {
+				q := u.Query()
+				q.Set("error_code", errCode)
+				q.Set("error_message", errMsg)
+				u.RawQuery = q.Encode()
+				log.Printf("auth: apple_web action=redirect outcome=web_account_required host=%s", u.Host)
+				http.Redirect(w, r, u.String(), http.StatusFound)
+				return
+			}
+		}
 	}
 
 	writeAPIError(w, errStatus, errCode, errMsg)
