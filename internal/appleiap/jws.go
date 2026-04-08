@@ -39,6 +39,14 @@ func DecodeJWSPayload(jwsCompact string, out any) error {
 	return nil
 }
 
+func VerifyAndDecodeJWSPayload(jwsCompact string, out any) error {
+	b, err := VerifyJWS(jwsCompact)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, out)
+}
+
 func (p TransactionPayload) ExpiresAt() *time.Time {
 	if p.ExpiresDate <= 0 {
 		return nil

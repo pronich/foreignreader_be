@@ -90,3 +90,93 @@ func (s *Store) UpsertSubscription(ctx context.Context, tx *sql.Tx, in Subscript
 	return err
 }
 
+type SubscriptionRow struct {
+	UserID             uuid.UUID
+	AppleProductID     string
+	ProductCode        string
+	OriginalTransactionID string
+	LatestTransactionID   sql.NullString
+	Status             string
+	Environment        string
+	ExpiresAt          sql.NullTime
+}
+
+func (s *Store) SubscriptionByOriginalTransactionID(ctx context.Context, tx *sql.Tx, originalTx string) (SubscriptionRow, error) {
+	var row SubscriptionRow
+	err := tx.QueryRowContext(ctx, `
+		SELECT user_id, apple_product_id, product_code, original_transaction_id, latest_transaction_id, status, environment, expires_at
+		FROM apple_iap_subscriptions
+		WHERE original_transaction_id = $1
+	`, originalTx).Scan(
+		&row.UserID,
+		&row.AppleProductID,
+		&row.ProductCode,
+		&row.OriginalTransactionID,
+		&row.LatestTransactionID,
+		&row.Status,
+		&row.Environment,
+		&row.ExpiresAt,
+	)
+	return row, err
+}
+
+func (s *Store) UpdateSubscriptionStateByOriginalTransactionID(
+	ctx context.Context,
+	tx *sql.Tx,
+	originalTx string,
+	latestTx string,
+	status string,
+	environment string,
+	expiresAt *time.Time,
+) error {
+	var exp any = nil
+	if expiresAt != nil {
+		exp = expiresAt.UTC()
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE apple_iap_subscriptions
+		SET latest_transaction_id = NULLIF($2, ''),
+		    status = $3,
+		    environment = $4,
+		    expires_at = $5,
+		    updated_at = now()
+		WHERE original_transaction_id = $1
+	`, originalTx, latestTx, status, environment, exp)
+	return err
+}
+
+func (s *Store) InsertAppleEvent(ctx context.Context, tx *sql.Tx, e AppleEventInsert) (inserted bool, err error) {
+	var id uuid.UUID
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO apple_iap_events (notification_uuid, notification_type, subtype, original_transaction_id, transaction_id, signed_payload, created_at)
+		VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, now())
+		ON CONFLICT (notification_uuid) DO NOTHING
+		RETURNING id
+	`, e.NotificationUUID, e.NotificationType, e.Subtype, e.OriginalTransactionID, e.TransactionID, e.SignedPayload).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Store) MarkAppleEventProcessed(ctx context.Context, tx *sql.Tx, notificationUUID string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE apple_iap_events
+		SET processed_at = now()
+		WHERE notification_uuid = $1 AND processed_at IS NULL
+	`, notificationUUID)
+	return err
+}
+
+type AppleEventInsert struct {
+	NotificationUUID     string
+	NotificationType     string
+	Subtype              string
+	OriginalTransactionID string
+	TransactionID        string
+	SignedPayload        string
+}
+
