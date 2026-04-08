@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,8 +24,6 @@ func VerifyJWS(jwsCompact string) ([]byte, error) {
 	if len(parts) != 3 {
 		return nil, fmt.Errorf("%w: invalid jws format", ErrInvalidSignedPayload)
 	}
-
-	var payloadRaw json.RawMessage
 
 	claims := jwt.MapClaims{}
 	parsed, err := jwt.NewParser(
@@ -61,7 +58,7 @@ func VerifyJWS(jwsCompact string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid payload encoding", ErrInvalidSignedPayload)
 	}
-	if err := json.Unmarshal(payloadBytes, &payloadRaw); err != nil {
+	if !json.Valid(payloadBytes) {
 		return nil, fmt.Errorf("%w: invalid payload json", ErrInvalidSignedPayload)
 	}
 	return payloadBytes, nil
@@ -106,9 +103,9 @@ func verifyAppleCertChain(leaf *x509.Certificate, intermediates []*x509.Certific
 	if leaf == nil {
 		return fmt.Errorf("%w: missing leaf cert", ErrInvalidSignedPayload)
 	}
-	roots, err := x509.SystemCertPool()
-	if err != nil || roots == nil {
-		roots = x509.NewCertPool()
+	roots, err := appleTrustRoots()
+	if err != nil {
+		return err
 	}
 	interPool := x509.NewCertPool()
 	for _, ic := range intermediates {
@@ -120,17 +117,24 @@ func verifyAppleCertChain(leaf *x509.Certificate, intermediates []*x509.Certific
 		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 	})
 	if err != nil {
-		return fmt.Errorf("%w: cert chain verify failed", ErrInvalidSignedPayload)
+		return fmt.Errorf("%w: cert chain verify failed: %v", ErrInvalidSignedPayload, err)
 	}
 	return nil
 }
 
-// Helper for local testing: allow supplying a PEM chain (not used in prod flow).
-func parseCertPEM(pemText string) (*x509.Certificate, error) {
-	block, _ := pem.Decode([]byte(strings.TrimSpace(pemText)))
-	if block == nil {
-		return nil, errors.New("invalid pem")
+// appleTrustRoots merges the OS trust store with Apple's official root CAs.
+// Relying on SystemCertPool alone often fails in minimal Linux images (e.g. Alpine)
+// where Apple Root CA - G2/G3 are not present, which breaks x5c chain verification.
+func appleTrustRoots() (*x509.CertPool, error) {
+	roots, err := x509.SystemCertPool()
+	if err != nil || roots == nil {
+		roots = x509.NewCertPool()
 	}
-	return x509.ParseCertificate(block.Bytes)
+	for _, pemBlock := range [][]byte{[]byte(appleRootCAG2PEM), []byte(appleRootCAG3PEM)} {
+		if ok := roots.AppendCertsFromPEM(pemBlock); !ok {
+			return nil, fmt.Errorf("%w: could not load embedded Apple root CA", ErrInvalidSignedPayload)
+		}
+	}
+	return roots, nil
 }
 
