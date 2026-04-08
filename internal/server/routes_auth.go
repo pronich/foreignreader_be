@@ -23,6 +23,8 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store
 		handleAuthGoogle(w, r, cfg, store, issuer)
 	})
 	mux.Handle("GET /api/v1/me", bearerAuthHandler(store, issuer, handleAuthMe))
+
+	registerAppleWebAuthRoutes(mux, cfg, store, issuer)
 }
 
 type mockClaimsBody struct {
