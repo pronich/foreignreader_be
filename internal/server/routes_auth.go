@@ -36,6 +36,9 @@ type mockClaimsBody struct {
 type appleAuthRequest struct {
 	Source        string          `json:"source"`
 	IdentityToken string          `json:"identityToken"`
+	Nonce         *string         `json:"nonce,omitempty"`
+	Email         *string         `json:"email,omitempty"`
+	FullName      *string         `json:"fullName,omitempty"`
 	MockClaims    *mockClaimsBody `json:"mockClaims,omitempty"`
 }
 
@@ -134,13 +137,49 @@ func handleAuthApple(w http.ResponseWriter, r *http.Request, cfg config.Config, 
 		return
 	}
 
-	handleMockableAuth(w, r, cfg, store, issuer, "apple", "identityToken", source, body, func(body []byte) (string, *mockClaimsBody, error) {
-		var ar appleAuthRequest
-		if err := json.Unmarshal(body, &ar); err != nil {
-			return "", nil, err
+	if strings.TrimSpace(req.IdentityToken) == "" {
+		log.Printf("auth: request_id=%s provider=apple source=%s reason=missing_identity_token", requestIDFromContext(r.Context()), source)
+		writeAPIError(w, http.StatusBadRequest, "missing_identity_token", "identityToken is required")
+		return
+	}
+
+	mockAllowed := cfg.MockAuthAllowed()
+	if req.MockClaims != nil && !mockAllowed {
+		log.Printf("auth: request_id=%s provider=apple source=%s reason=mock_present_but_disabled app_env=%q auth_dev_mode=%t",
+			requestIDFromContext(r.Context()), source, cfg.AppEnv, cfg.AuthDevMode)
+		writeAPIError(w, http.StatusForbidden, "mock_auth_disabled", "mock authentication is not enabled for this environment")
+		return
+	}
+
+	if mockAllowed && req.MockClaims != nil {
+		if strings.TrimSpace(req.MockClaims.Sub) == "" {
+			log.Printf("auth: request_id=%s provider=apple source=%s reason=missing_mock_sub", requestIDFromContext(r.Context()), source)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "mockClaims.sub is required")
+			return
 		}
-		return ar.IdentityToken, ar.MockClaims, nil
-	})
+		in := &auth.MockClaimsInput{
+			Sub:           strings.TrimSpace(req.MockClaims.Sub),
+			Email:         req.MockClaims.Email,
+			EmailVerified: req.MockClaims.EmailVerified,
+			DisplayName:   req.MockClaims.DisplayName,
+			AvatarURL:     req.MockClaims.AvatarURL,
+		}
+		completeAuthLogin(w, r, store, issuer, "apple", in, source)
+		return
+	}
+
+	handleAppleOIDC(
+		w,
+		r,
+		cfg,
+		store,
+		issuer,
+		strings.TrimSpace(req.IdentityToken),
+		req.Nonce,
+		req.Email,
+		req.FullName,
+		source,
+	)
 }
 
 func handleAuthGoogle(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer) {
@@ -207,6 +246,52 @@ func handleAuthGoogle(w http.ResponseWriter, r *http.Request, cfg config.Config,
 	}
 
 	handleGoogleOIDC(w, r, cfg, store, issuer, strings.TrimSpace(req.IDToken), source)
+}
+
+func handleAppleOIDC(
+	w http.ResponseWriter,
+	r *http.Request,
+	cfg config.Config,
+	store *auth.Store,
+	issuer *auth.TokenIssuer,
+	identityToken string,
+	nonce *string,
+	email *string,
+	fullName *string,
+	source authRequestSource,
+) {
+	rid := requestIDFromContext(r.Context())
+	log.Printf("auth: request_id=%s provider=apple source=%s action=apple_auth_received token_len=%d", rid, source, len(identityToken))
+
+	verifier, err := auth.NewAppleVerifier(cfg.AppleAudience, cfg.AppleJWKSCacheTTL)
+	if err != nil {
+		log.Printf("auth: request_id=%s provider=apple source=%s action=apple_verifier_init_failed err=%v", rid, source, err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "authentication processing failed")
+		return
+	}
+
+	in, err := verifier.VerifyIdentityToken(r.Context(), identityToken, nonce)
+	if err != nil {
+		log.Printf("auth: request_id=%s provider=apple source=%s action=apple_token_invalid err=%v", rid, source, err)
+		writeAPIError(w, http.StatusUnauthorized, "invalid_apple_token", "Apple identity token verification failed")
+		return
+	}
+	log.Printf("auth: request_id=%s provider=apple source=%s action=apple_token_ok apple_sub=%s", rid, source, in.Sub)
+
+	// Apple provides email/fullName out-of-band (credential), not reliably in the identity token.
+	// Treat these as profile hints only after the identity token is verified.
+	if email != nil {
+		if t := strings.TrimSpace(*email); t != "" {
+			in.Email = &t
+		}
+	}
+	if fullName != nil {
+		if t := strings.TrimSpace(*fullName); t != "" {
+			in.DisplayName = &t
+		}
+	}
+
+	completeAuthLogin(w, r, store, issuer, "apple", in, source)
 }
 
 func handleGoogleOIDC(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, idToken string, source authRequestSource) {

@@ -158,3 +158,35 @@ func (s *Store) SetDevPro(ctx context.Context, userID uuid.UUID, active bool) (E
 	}
 	return e, nil
 }
+
+// UpsertAppleIAPPro revokes active Apple-IAP Pro rows for the user and inserts a new active Pro row (source = apple_iap).
+func (s *Store) UpsertAppleIAPPro(ctx context.Context, tx *sql.Tx, userID uuid.UUID, expiresAt sql.NullTime) error {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE entitlements
+		SET status = 'revoked', updated_at = now()
+		WHERE user_id = $1
+		  AND product_code = $2
+		  AND source = 'apple_iap'
+		  AND status = 'active'
+	`, userID, ProductPro); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO entitlements (user_id, product_code, status, source, starts_at, expires_at, created_at, updated_at)
+		VALUES ($1, $2, 'active', 'apple_iap', now(), $3, now(), now())
+	`, userID, ProductPro, expiresAt)
+	return err
+}
+
+// RevokeAppleIAPPro revokes active Apple-IAP-sourced Pro entitlements for the user.
+func (s *Store) RevokeAppleIAPPro(ctx context.Context, tx *sql.Tx, userID uuid.UUID) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE entitlements
+		SET status = 'revoked', updated_at = now()
+		WHERE user_id = $1
+		  AND product_code = $2
+		  AND source = 'apple_iap'
+		  AND status = 'active'
+	`, userID, ProductPro)
+	return err
+}
