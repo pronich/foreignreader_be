@@ -33,23 +33,24 @@ type Config struct {
 	AppleJWKSCacheTTL time.Duration
 
 	// Apple IAP (App Store Server API) credentials + settings.
-	AppleIAPIssuerID    string
-	AppleIAPKeyID       string
-	AppleIAPPrivateKey  string
-	AppleIAPBundleID    string
-	AppleIAPEnvironment string // sandbox|production
+	AppleIAPIssuerID     string
+	AppleIAPKeyID        string
+	AppleIAPPrivateKey   string
+	AppleIAPBundleID     string
+	AppleIAPEnvironment  string // sandbox|production
 	AppleIAPProProductID string
 
 	// Sign in with Apple — web (Services ID) callback /auth/apple/callback.
 	// APPLE_WEB_CLIENT_ID = Services ID; APPLE_WEB_REDIRECT_URL must match App Store Connect exactly.
 	// APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY = key used to sign the client_secret JWT for token exchange.
-	// Optional APPLE_WEB_LOGIN_LANDING_URL: on success/error, redirect browser there with query params instead of JSON-only.
-	AppleWebClientID           string
-	AppleWebRedirectURL        string
-	AppleTeamID                string
-	AppleWebSignInKeyID        string // env APPLE_KEY_ID (Sign in with Apple key, not IAP)
-	AppleWebPrivateKey         string // env APPLE_PRIVATE_KEY (PEM, multiline or \n escaped)
-	AppleWebLoginLandingURL    string
+	// Optional APPLE_WEB_SUCCESS_REDIRECT_URL / APPLE_WEB_ACCOUNT_REQUIRED_REDIRECT_URL: browser redirects after callback (JSON if unset).
+	AppleWebClientID                   string
+	AppleWebRedirectURL                string
+	AppleTeamID                        string
+	AppleWebSignInKeyID                string // env APPLE_KEY_ID (Sign in with Apple key, not IAP)
+	AppleWebPrivateKey                 string // env APPLE_PRIVATE_KEY (PEM, multiline or \n escaped)
+	AppleWebSuccessRedirectURL         string // e.g. https://foreignreader.io/cabinet
+	AppleWebAccountRequiredRedirectURL string // e.g. https://foreignreader.io/account-required
 
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
@@ -142,7 +143,8 @@ func Load() Config {
 	appleTeamID := strings.TrimSpace(os.Getenv("APPLE_TEAM_ID"))
 	appleWebSignInKeyID := strings.TrimSpace(os.Getenv("APPLE_KEY_ID"))
 	appleWebPrivateKey := normalizeMultilineEnv(os.Getenv("APPLE_PRIVATE_KEY"))
-	appleWebLoginLandingURL := strings.TrimSpace(os.Getenv("APPLE_WEB_LOGIN_LANDING_URL"))
+	appleWebSuccessRedirectURL := strings.TrimSpace(os.Getenv("APPLE_WEB_SUCCESS_REDIRECT_URL"))
+	appleWebAccountRequiredRedirectURL := strings.TrimSpace(os.Getenv("APPLE_WEB_ACCOUNT_REQUIRED_REDIRECT_URL"))
 
 	key := os.Getenv("OPENAI_API_KEY")
 	if key == "" {
@@ -205,12 +207,13 @@ func Load() Config {
 		AppleIAPEnvironment:  appleIAPEnvironment,
 		AppleIAPProProductID: appleIAPProProductID,
 
-		AppleWebClientID:        appleWebClientID,
-		AppleWebRedirectURL:     appleWebRedirectURL,
-		AppleTeamID:             appleTeamID,
-		AppleWebSignInKeyID:     appleWebSignInKeyID,
-		AppleWebPrivateKey:      appleWebPrivateKey,
-		AppleWebLoginLandingURL: appleWebLoginLandingURL,
+		AppleWebClientID:                   appleWebClientID,
+		AppleWebRedirectURL:                appleWebRedirectURL,
+		AppleTeamID:                        appleTeamID,
+		AppleWebSignInKeyID:                appleWebSignInKeyID,
+		AppleWebPrivateKey:                 appleWebPrivateKey,
+		AppleWebSuccessRedirectURL:         appleWebSuccessRedirectURL,
+		AppleWebAccountRequiredRedirectURL: appleWebAccountRequiredRedirectURL,
 
 		ReadTimeout: getDurationEnv("READ_TIMEOUT", 30*time.Second),
 		// Includes handler time; set above TRANSLATE_CONTEXT_TIMEOUT so the HTTP server does not cut off OpenAI before the translate deadline.
