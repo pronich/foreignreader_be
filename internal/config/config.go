@@ -32,6 +32,14 @@ type Config struct {
 	// AppleJWKSCacheTTL is the in-memory cache TTL for Apple's JWKS.
 	AppleJWKSCacheTTL time.Duration
 
+	// Apple IAP (App Store Server API) credentials + settings.
+	AppleIAPIssuerID    string
+	AppleIAPKeyID       string
+	AppleIAPPrivateKey  string
+	AppleIAPBundleID    string
+	AppleIAPEnvironment string // sandbox|production
+	AppleIAPProProductID string
+
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
@@ -108,6 +116,16 @@ func Load() Config {
 	}
 	appleJWKSCacheTTL := getDurationEnv("APPLE_JWKS_CACHE_TTL", 6*time.Hour)
 
+	appleIAPIssuerID := strings.TrimSpace(os.Getenv("APPLE_IAP_ISSUER_ID"))
+	appleIAPKeyID := strings.TrimSpace(os.Getenv("APPLE_IAP_KEY_ID"))
+	appleIAPPrivateKey := normalizeMultilineEnv(os.Getenv("APPLE_IAP_PRIVATE_KEY"))
+	appleIAPBundleID := strings.TrimSpace(os.Getenv("APPLE_IAP_BUNDLE_ID"))
+	appleIAPEnvironment := strings.TrimSpace(os.Getenv("APPLE_IAP_ENVIRONMENT"))
+	if appleIAPEnvironment == "" {
+		appleIAPEnvironment = "production"
+	}
+	appleIAPProProductID := strings.TrimSpace(os.Getenv("APPLE_IAP_PRO_PRODUCT_ID"))
+
 	key := os.Getenv("OPENAI_API_KEY")
 	if key == "" {
 		log.Fatal("config: OPENAI_API_KEY is required")
@@ -162,6 +180,13 @@ func Load() Config {
 		AppleAudience:        appleAudience,
 		AppleJWKSCacheTTL:    appleJWKSCacheTTL,
 
+		AppleIAPIssuerID:     appleIAPIssuerID,
+		AppleIAPKeyID:        appleIAPKeyID,
+		AppleIAPPrivateKey:   appleIAPPrivateKey,
+		AppleIAPBundleID:     appleIAPBundleID,
+		AppleIAPEnvironment:  appleIAPEnvironment,
+		AppleIAPProProductID: appleIAPProProductID,
+
 		ReadTimeout: getDurationEnv("READ_TIMEOUT", 30*time.Second),
 		// Includes handler time; set above TRANSLATE_CONTEXT_TIMEOUT so the HTTP server does not cut off OpenAI before the translate deadline.
 		WriteTimeout:    getDurationEnv("WRITE_TIMEOUT", 120*time.Second),
@@ -202,6 +227,26 @@ func (c Config) BaseURL() string {
 func (c Config) MockAuthAllowed() bool {
 	env := strings.ToLower(strings.TrimSpace(c.AppEnv))
 	return c.AuthDevMode && env != "production"
+}
+
+// AppleIAPConfigured is true when all required Apple IAP credentials are present.
+func (c Config) AppleIAPConfigured() bool {
+	return strings.TrimSpace(c.AppleIAPIssuerID) != "" &&
+		strings.TrimSpace(c.AppleIAPKeyID) != "" &&
+		strings.TrimSpace(c.AppleIAPPrivateKey) != "" &&
+		strings.TrimSpace(c.AppleIAPBundleID) != "" &&
+		strings.TrimSpace(c.AppleIAPEnvironment) != "" &&
+		strings.TrimSpace(c.AppleIAPProProductID) != ""
+}
+
+func normalizeMultilineEnv(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	// Support env values that encode newlines as "\n" (common in Docker/CI secrets).
+	s = strings.ReplaceAll(s, `\n`, "\n")
+	return s
 }
 
 func parseBoolEnv(key string, def bool) bool {
