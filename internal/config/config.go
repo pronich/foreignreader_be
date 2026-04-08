@@ -26,6 +26,12 @@ type Config struct {
 	// GoogleServerClientID is the OAuth client ID (audience) used to validate Google ID tokens (e.g. iOS server client ID).
 	GoogleServerClientID string
 
+	// AppleAudience is the expected "aud" for Apple identity tokens (usually iOS bundle ID and/or Services ID).
+	// Supports a comma-separated list to allow multiple audiences.
+	AppleAudience string
+	// AppleJWKSCacheTTL is the in-memory cache TTL for Apple's JWKS.
+	AppleJWKSCacheTTL time.Duration
+
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
@@ -96,6 +102,12 @@ func Load() Config {
 		log.Fatal("config: GOOGLE_SERVER_CLIENT_ID is required")
 	}
 
+	appleAudience := strings.TrimSpace(os.Getenv("APPLE_AUDIENCE"))
+	if appleAudience == "" {
+		log.Fatal("config: APPLE_AUDIENCE is required")
+	}
+	appleJWKSCacheTTL := getDurationEnv("APPLE_JWKS_CACHE_TTL", 6*time.Hour)
+
 	key := os.Getenv("OPENAI_API_KEY")
 	if key == "" {
 		log.Fatal("config: OPENAI_API_KEY is required")
@@ -147,6 +159,8 @@ func Load() Config {
 		JWTSecret:   jwtSecret,
 
 		GoogleServerClientID: googleServerClientID,
+		AppleAudience:        appleAudience,
+		AppleJWKSCacheTTL:    appleJWKSCacheTTL,
 
 		ReadTimeout: getDurationEnv("READ_TIMEOUT", 30*time.Second),
 		// Includes handler time; set above TRANSLATE_CONTEXT_TIMEOUT so the HTTP server does not cut off OpenAI before the translate deadline.
