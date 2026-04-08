@@ -13,8 +13,31 @@ import (
 	"foreignreader_be/internal/config"
 )
 
+// maxAppleWebCallbackBody caps POST body size for Apple's form_post callback (application/x-www-form-urlencoded).
+const maxAppleWebCallbackBody = 64 << 10 // 64 KiB; Apple sends a few KB
+
 func registerAppleWebAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer) {
-	mux.HandleFunc("GET /auth/apple/callback", handleAppleWebCallback(cfg, store, issuer))
+	h := handleAppleWebCallback(cfg, store, issuer)
+	// GET: response_mode=query. POST: response_mode=form_post (required when using Sign in with Apple JS with name/email scope).
+	mux.HandleFunc("GET /auth/apple/callback", h)
+	mux.HandleFunc("POST /auth/apple/callback", h)
+}
+
+// appleWebAuthorizationValues returns OAuth callback parameters from the query string (GET) or form body (POST).
+// Apple's web flow POSTs application/x-www-form-urlencoded to redirect_uri with code, state, optional user, optional id_token.
+func appleWebAuthorizationValues(r *http.Request, w http.ResponseWriter) (url.Values, error) {
+	switch r.Method {
+	case http.MethodGet:
+		return r.URL.Query(), nil
+	case http.MethodPost:
+		r.Body = http.MaxBytesReader(w, r.Body, maxAppleWebCallbackBody)
+		if err := r.ParseForm(); err != nil {
+			return nil, err
+		}
+		return r.Form, nil
+	default:
+		return nil, errors.New("unsupported method")
+	}
 }
 
 func handleAppleWebCallback(cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer) http.HandlerFunc {
@@ -28,26 +51,38 @@ func handleAppleWebCallback(cfg config.Config, store *auth.Store, issuer *auth.T
 			return
 		}
 
-		if r.Method != http.MethodGet {
+		if r.Method != http.MethodGet && r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		q := r.URL.Query()
-		if errO := strings.TrimSpace(q.Get("error")); errO != "" {
+		transport := "query"
+		if r.Method == http.MethodPost {
+			transport = "form_post"
+		}
+		log.Printf("auth: request_id=%s provider=apple_web transport=%s", rid, transport)
+
+		vals, err := appleWebAuthorizationValues(r, w)
+		if err != nil {
+			log.Printf("auth: request_id=%s provider=apple_web action=parse_form_failed err=%v", rid, err)
+			respondAppleWebCallback(w, r, cfg, nil, http.StatusBadRequest, "malformed_callback", "invalid or oversized callback request")
+			return
+		}
+
+		if errO := strings.TrimSpace(vals.Get("error")); errO != "" {
 			log.Printf("auth: request_id=%s provider=apple_web action=oauth_error oauth_error=%s", rid, errO)
 			respondAppleWebCallback(w, r, cfg, nil, http.StatusBadRequest, "oauth_denied", "Sign in with Apple was cancelled or failed")
 			return
 		}
 
-		code := strings.TrimSpace(q.Get("code"))
+		code := strings.TrimSpace(vals.Get("code"))
 		if code == "" {
 			respondAppleWebCallback(w, r, cfg, nil, http.StatusBadRequest, "missing_code", "authorization code is required")
 			return
 		}
 
 		var appleFirst *auth.AppleWebUserParam
-		if uq := q.Get("user"); uq != "" {
+		if uq := vals.Get("user"); uq != "" {
 			if u, err := auth.ParseAppleWebUserQuery(uq); err == nil && u != nil {
 				appleFirst = u
 			}
