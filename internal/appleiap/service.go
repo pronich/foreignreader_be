@@ -53,9 +53,23 @@ func (s *Service) ValidateTransaction(ctx context.Context, userID uuid.UUID, tra
 		return nil, err
 	}
 
-	var payload TransactionPayload
-	if err := DecodeJWSPayload(resp.SignedTransactionInfo, &payload); err != nil {
+	var direct TransactionPayload
+	if err := DecodeJWSPayload(resp.SignedTransactionInfo, &direct); err != nil {
 		return nil, fmt.Errorf("decode signedTransactionInfo: %w", err)
+	}
+
+	// When this is a renewal (transactionId ≠ originalTransactionId), the single-transaction
+	// payload can lag behind the latest subscription state. Query subscription status by
+	// originalTransactionId and prefer the newest Pro transaction from lastTransactions.
+	payload := direct
+	if strings.TrimSpace(direct.TransactionID) != strings.TrimSpace(direct.OriginalTransactionID) &&
+		strings.TrimSpace(direct.OriginalTransactionID) != "" {
+		sub, err := s.Client.GetSubscriptionStatuses(ctx, direct.OriginalTransactionID)
+		if err == nil {
+			if best, err2 := BestProTransactionPayload(sub, s.ProProductID); err2 == nil && best != nil {
+				payload = *best
+			}
+		}
 	}
 
 	productID := strings.TrimSpace(payload.ProductID)
