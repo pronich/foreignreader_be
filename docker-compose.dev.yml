@@ -47,6 +47,13 @@ services:
       GOOGLE_SERVER_CLIENT_ID: "${GOOGLE_SERVER_CLIENT_ID:?GOOGLE_SERVER_CLIENT_ID must be set}"
       APPLE_AUDIENCE: "${APPLE_AUDIENCE:?APPLE_AUDIENCE must be set}"
       APPLE_JWKS_CACHE_TTL: "${APPLE_JWKS_CACHE_TTL:-6h}"
+      # Sign in with Apple (web): Services ID + redirect + team + .p8 key for token exchange; optional browser redirect after callback
+      APPLE_WEB_CLIENT_ID: "${APPLE_WEB_CLIENT_ID:-}"
+      APPLE_WEB_REDIRECT_URL: "${APPLE_WEB_REDIRECT_URL:-}"
+      APPLE_TEAM_ID: "${APPLE_TEAM_ID:-}"
+      APPLE_KEY_ID: "${APPLE_KEY_ID:-}"
+      APPLE_PRIVATE_KEY: "${APPLE_PRIVATE_KEY:-}"
+      APPLE_WEB_LOGIN_LANDING_URL: "${APPLE_WEB_LOGIN_LANDING_URL:-}"
       APPLE_IAP_ISSUER_ID: "${APPLE_IAP_ISSUER_ID:-}"
       APPLE_IAP_KEY_ID: "${APPLE_IAP_KEY_ID:-}"
       APPLE_IAP_PRIVATE_KEY: "${APPLE_IAP_PRIVATE_KEY:-}"

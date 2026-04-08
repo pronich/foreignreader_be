@@ -40,6 +40,17 @@ type Config struct {
 	AppleIAPEnvironment string // sandbox|production
 	AppleIAPProProductID string
 
+	// Sign in with Apple — web (Services ID) callback /auth/apple/callback.
+	// APPLE_WEB_CLIENT_ID = Services ID; APPLE_WEB_REDIRECT_URL must match App Store Connect exactly.
+	// APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY = key used to sign the client_secret JWT for token exchange.
+	// Optional APPLE_WEB_LOGIN_LANDING_URL: on success/error, redirect browser there with query params instead of JSON-only.
+	AppleWebClientID           string
+	AppleWebRedirectURL        string
+	AppleTeamID                string
+	AppleWebSignInKeyID        string // env APPLE_KEY_ID (Sign in with Apple key, not IAP)
+	AppleWebPrivateKey         string // env APPLE_PRIVATE_KEY (PEM, multiline or \n escaped)
+	AppleWebLoginLandingURL    string
+
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
@@ -126,6 +137,13 @@ func Load() Config {
 	}
 	appleIAPProProductID := strings.TrimSpace(os.Getenv("APPLE_IAP_PRO_PRODUCT_ID"))
 
+	appleWebClientID := strings.TrimSpace(os.Getenv("APPLE_WEB_CLIENT_ID"))
+	appleWebRedirectURL := strings.TrimSpace(os.Getenv("APPLE_WEB_REDIRECT_URL"))
+	appleTeamID := strings.TrimSpace(os.Getenv("APPLE_TEAM_ID"))
+	appleWebSignInKeyID := strings.TrimSpace(os.Getenv("APPLE_KEY_ID"))
+	appleWebPrivateKey := normalizeMultilineEnv(os.Getenv("APPLE_PRIVATE_KEY"))
+	appleWebLoginLandingURL := strings.TrimSpace(os.Getenv("APPLE_WEB_LOGIN_LANDING_URL"))
+
 	key := os.Getenv("OPENAI_API_KEY")
 	if key == "" {
 		log.Fatal("config: OPENAI_API_KEY is required")
@@ -187,6 +205,13 @@ func Load() Config {
 		AppleIAPEnvironment:  appleIAPEnvironment,
 		AppleIAPProProductID: appleIAPProProductID,
 
+		AppleWebClientID:        appleWebClientID,
+		AppleWebRedirectURL:     appleWebRedirectURL,
+		AppleTeamID:             appleTeamID,
+		AppleWebSignInKeyID:     appleWebSignInKeyID,
+		AppleWebPrivateKey:      appleWebPrivateKey,
+		AppleWebLoginLandingURL: appleWebLoginLandingURL,
+
 		ReadTimeout: getDurationEnv("READ_TIMEOUT", 30*time.Second),
 		// Includes handler time; set above TRANSLATE_CONTEXT_TIMEOUT so the HTTP server does not cut off OpenAI before the translate deadline.
 		WriteTimeout:    getDurationEnv("WRITE_TIMEOUT", 120*time.Second),
@@ -237,6 +262,15 @@ func (c Config) AppleIAPConfigured() bool {
 		strings.TrimSpace(c.AppleIAPBundleID) != "" &&
 		strings.TrimSpace(c.AppleIAPEnvironment) != "" &&
 		strings.TrimSpace(c.AppleIAPProProductID) != ""
+}
+
+// AppleWebSignInConfigured is true when Sign in with Apple web callback can exchange codes and validate id_tokens.
+func (c Config) AppleWebSignInConfigured() bool {
+	return strings.TrimSpace(c.AppleWebClientID) != "" &&
+		strings.TrimSpace(c.AppleWebRedirectURL) != "" &&
+		strings.TrimSpace(c.AppleTeamID) != "" &&
+		strings.TrimSpace(c.AppleWebSignInKeyID) != "" &&
+		strings.TrimSpace(c.AppleWebPrivateKey) != ""
 }
 
 func normalizeMultilineEnv(raw string) string {
