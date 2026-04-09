@@ -39,9 +39,11 @@ func New(cfg config.Config, tr *translate.Client, db *sql.DB) *http.Server {
 	registerUserRoutes(mux, store, issuer)
 	registerReadingPositionRoutes(mux, store, issuer, entStore, rpSvc)
 
+	corsOrigins := newCORSOriginSet(cfg.CORSAllowedOrigins)
 	handler := chain(
 		mux,
 		withRequestID,
+		withCORS(corsOrigins),
 		withRequestLogging,
 		withRecovery,
 	)

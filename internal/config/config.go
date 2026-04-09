@@ -89,6 +89,9 @@ type Config struct {
 	StripePriceIDPro string
 	// StripeRedirectURL is where Stripe Checkout returns the user after success/cancel.
 	StripeRedirectURL string
+
+	// CORSAllowedOrigins lists allowed browser Origin values for /api/* (see CORS_ALLOWED_ORIGINS).
+	CORSAllowedOrigins []string
 }
 
 func Load() Config {
@@ -187,6 +190,8 @@ func Load() Config {
 	}
 	validateStripeRequired(stripeSecretKey, stripeWebhookSecret, stripePriceIDPro)
 
+	corsAllowedOrigins := parseCORSAllowedOrigins(os.Getenv("CORS_ALLOWED_ORIGINS"))
+
 	return Config{
 		Port:   port,
 		AppEnv: appEnv,
@@ -240,6 +245,8 @@ func Load() Config {
 		StripeWebhookSecret: stripeWebhookSecret,
 		StripePriceIDPro:    stripePriceIDPro,
 		StripeRedirectURL:   stripeRedirectURL,
+
+		CORSAllowedOrigins: corsAllowedOrigins,
 	}
 }
 
@@ -274,6 +281,27 @@ func (c Config) AppleWebSignInConfigured() bool {
 		strings.TrimSpace(c.AppleTeamID) != "" &&
 		strings.TrimSpace(c.AppleWebSignInKeyID) != "" &&
 		strings.TrimSpace(c.AppleWebPrivateKey) != ""
+}
+
+// parseCORSAllowedOrigins parses CORS_ALLOWED_ORIGINS (comma-separated exact Origin values).
+// Empty or unset defaults to production web origins.
+func parseCORSAllowedOrigins(raw string) []string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return []string{"https://foreignreader.io", "https://www.foreignreader.io"}
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"https://foreignreader.io", "https://www.foreignreader.io"}
+	}
+	return out
 }
 
 func normalizeMultilineEnv(raw string) string {
