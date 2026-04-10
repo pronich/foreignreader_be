@@ -57,6 +57,11 @@ func handleAppleIAPValidate(cfg config.Config, ent *entitlement.Store) http.Hand
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 			return
 		}
+
+		rid := requestIDFromContext(r.Context())
+		log.Printf("iap/apple/validate: request_id=%s user_id=%s action=request_payload source=%q transaction_id=%q",
+			rid, u.ID.String(), strings.TrimSpace(req.Source), strings.TrimSpace(req.TransactionID))
+
 		source, err := parseAuthRequestSourceField(req.Source)
 		if err != nil || source != authRequestSourceApp {
 			writeAPIError(w, http.StatusBadRequest, "invalid_source", "source must be app")
@@ -67,22 +72,19 @@ func handleAppleIAPValidate(cfg config.Config, ent *entitlement.Store) http.Hand
 			return
 		}
 
-		rid := requestIDFromContext(r.Context())
-		log.Printf("iap/apple: request_id=%s user_id=%s action=validate_start txid_len=%d", rid, u.ID, len(strings.TrimSpace(req.TransactionID)))
-
 		env := appleiap.EnvProduction
 		if strings.EqualFold(strings.TrimSpace(cfg.AppleIAPEnvironment), "sandbox") {
 			env = appleiap.EnvSandbox
 		}
 		client, err := appleiap.NewClient(env, cfg.AppleIAPIssuerID, cfg.AppleIAPKeyID, cfg.AppleIAPBundleID, cfg.AppleIAPPrivateKey)
 		if err != nil {
-			log.Printf("iap/apple: request_id=%s user_id=%s action=client_init_failed err=%v", rid, u.ID, err)
+			log.Printf("iap/apple: request_id=%s user_id=%s action=client_init_failed err=%v", rid, u.ID.String(), err)
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not validate purchase")
 			return
 		}
 		svc, err := appleiap.NewService(client, appleiap.NewStore(ent.DB), ent, cfg.AppleIAPProProductID)
 		if err != nil {
-			log.Printf("iap/apple: request_id=%s user_id=%s action=service_init_failed err=%v", rid, u.ID, err)
+			log.Printf("iap/apple: request_id=%s user_id=%s action=service_init_failed err=%v", rid, u.ID.String(), err)
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not validate purchase")
 			return
 		}
@@ -97,12 +99,12 @@ func handleAppleIAPValidate(cfg config.Config, ent *entitlement.Store) http.Hand
 				writeAPIError(w, http.StatusForbidden, "subscription_inactive", "subscription is not active")
 				return
 			}
-			log.Printf("iap/apple: request_id=%s user_id=%s action=validate_failed err=%v", rid, u.ID, err)
+			log.Printf("iap/apple: request_id=%s user_id=%s action=validate_failed err=%v", rid, u.ID.String(), err)
 			writeAPIError(w, http.StatusBadGateway, "iap_validation_failed", "Apple IAP validation failed")
 			return
 		}
 
-		log.Printf("iap/apple: request_id=%s user_id=%s action=validate_ok status=%s expires_at=%v", rid, u.ID, res.Status, res.ExpiresAt)
+		log.Printf("iap/apple: request_id=%s user_id=%s action=validate_ok status=%s expires_at=%v", rid, u.ID.String(), res.Status, res.ExpiresAt)
 
 		// Response mirrors entitlement patterns already used.
 		out := appleIAPValidateResponse{
