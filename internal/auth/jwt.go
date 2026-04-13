@@ -12,15 +12,20 @@ import (
 
 // TokenIssuer signs and verifies HS256 access tokens.
 type TokenIssuer struct {
-	secret []byte
+	secret        []byte
+	accessTokenTTL time.Duration
 }
 
-func NewTokenIssuer(secret string) (*TokenIssuer, error) {
+// NewTokenIssuer creates an issuer. accessTokenTTL applies to both app and web access tokens.
+func NewTokenIssuer(secret string, accessTokenTTL time.Duration) (*TokenIssuer, error) {
 	s := strings.TrimSpace(secret)
 	if s == "" {
 		return nil, errors.New("jwt secret is empty")
 	}
-	return &TokenIssuer{secret: []byte(s)}, nil
+	if accessTokenTTL <= 0 {
+		return nil, errors.New("access token TTL must be positive")
+	}
+	return &TokenIssuer{secret: []byte(s), accessTokenTTL: accessTokenTTL}, nil
 }
 
 // AccessClaims is the payload for backend-issued access tokens.
@@ -37,24 +42,30 @@ const (
 	TokenTypeWeb = "web"
 )
 
-// IssueAccessToken creates a signed JWT with subject = internal user id and provider claim (mobile app; 24h).
-func (t *TokenIssuer) IssueAccessToken(userID uuid.UUID, provider string) (string, error) {
+// IssueAccessToken creates a signed JWT with subject = internal user id and provider claim (mobile app).
+func (t *TokenIssuer) IssueAccessToken(userID uuid.UUID, provider string) (token string, expiresAt time.Time, err error) {
 	now := time.Now()
+	expiresAt = now.Add(t.accessTokenTTL).UTC()
 	claims := AccessClaims{
 		Provider: provider,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
 		},
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return tok.SignedString(t.secret)
+	s, err := tok.SignedString(t.secret)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return s, expiresAt, nil
 }
 
-// IssueWebAccessToken issues a short-lived JWT for the web cabinet (8h), distinct from app tokens via claims.
-func (t *TokenIssuer) IssueWebAccessToken(userID uuid.UUID, provider string) (string, error) {
+// IssueWebAccessToken issues a JWT for the web cabinet, distinct from app tokens via claims.
+func (t *TokenIssuer) IssueWebAccessToken(userID uuid.UUID, provider string) (token string, expiresAt time.Time, err error) {
 	now := time.Now()
+	expiresAt = now.Add(t.accessTokenTTL).UTC()
 	claims := AccessClaims{
 		Provider:  provider,
 		TokenType: TokenTypeWeb,
@@ -62,11 +73,15 @@ func (t *TokenIssuer) IssueWebAccessToken(userID uuid.UUID, provider string) (st
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(8 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
 		},
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return tok.SignedString(t.secret)
+	s, err := tok.SignedString(t.secret)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return s, expiresAt, nil
 }
 
 // ParseAccessToken validates the token and returns internal user id and provider.

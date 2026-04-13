@@ -23,6 +23,11 @@ type Config struct {
 	// JWTSecret signs backend-issued access tokens (required).
 	JWTSecret string
 
+	// AccessTokenTTL is the lifetime of JWT access tokens (app and web).
+	AccessTokenTTL time.Duration
+	// RefreshSessionTTL is the lifetime of refresh-token sessions stored in auth_sessions.
+	RefreshSessionTTL time.Duration
+
 	// GoogleServerClientID is the OAuth client ID (audience) used to validate Google ID tokens (e.g. iOS server client ID).
 	GoogleServerClientID string
 
@@ -118,6 +123,9 @@ func Load() Config {
 		log.Fatal("config: JWT_SECRET is required")
 	}
 
+	accessTokenTTL := getDurationEnv("ACCESS_TOKEN_TTL", 8*time.Hour)
+	refreshSessionTTL := getDurationEnv("REFRESH_SESSION_TTL", 180*24*time.Hour)
+
 	authDevMode := parseBoolEnv("AUTH_DEV_MODE", false)
 
 	googleServerClientID := strings.TrimSpace(os.Getenv("GOOGLE_SERVER_CLIENT_ID"))
@@ -200,6 +208,9 @@ func Load() Config {
 
 		AuthDevMode: authDevMode,
 		JWTSecret:   jwtSecret,
+
+		AccessTokenTTL:    accessTokenTTL,
+		RefreshSessionTTL: refreshSessionTTL,
 
 		GoogleServerClientID: googleServerClientID,
 		AppleAudience:        appleAudience,

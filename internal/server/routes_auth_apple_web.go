@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"foreignreader_be/internal/auth"
 	"foreignreader_be/internal/config"
@@ -145,7 +146,7 @@ func handleAppleWebCallback(cfg config.Config, store *auth.Store, issuer *auth.T
 		}
 		log.Printf("auth: request_id=%s provider=apple_web source=web action=user_found user_id=%s", rid, user.ID.String())
 
-		access, err := issuer.IssueWebAccessToken(user.ID, "apple")
+		access, accessExp, err := issuer.IssueWebAccessToken(user.ID, "apple")
 		if err != nil {
 			log.Printf("auth: request_id=%s provider=apple_web source=web jwt_issue err=%v", rid, err)
 			respondAppleWebCallback(w, r, cfg, nil, http.StatusInternalServerError, "auth_failed", "could not issue access token")
@@ -154,10 +155,11 @@ func handleAppleWebCallback(cfg config.Config, store *auth.Store, issuer *auth.T
 		log.Printf("auth: request_id=%s provider=apple_web source=web user_id=%s token_type=web jwt_ok", rid, user.ID.String())
 
 		resp := &authLoginResponse{
-			AccessToken: access,
-			User:        userPublicFromAuth(user),
-			TokenType:   auth.TokenTypeWeb,
-			ExpiresIn:   8 * 3600,
+			AccessToken:          access,
+			AccessTokenExpiresAt: accessExp.UTC(),
+			User:                 userPublicFromAuth(user),
+			TokenType:            auth.TokenTypeWeb,
+			ExpiresIn:            int64(cfg.AccessTokenTTL / time.Second),
 		}
 		respondAppleWebCallback(w, r, cfg, resp, http.StatusOK, "", "")
 	}
@@ -174,6 +176,9 @@ func respondAppleWebCallback(w http.ResponseWriter, r *http.Request, cfg config.
 				q.Set("accessToken", success.AccessToken)
 				q.Set("tokenType", success.TokenType)
 				q.Set("userId", success.User.ID)
+				if !success.AccessTokenExpiresAt.IsZero() {
+					q.Set("accessTokenExpiresAt", success.AccessTokenExpiresAt.UTC().Format(time.RFC3339))
+				}
 				u.RawQuery = q.Encode()
 				log.Printf("auth: apple_web action=redirect outcome=success host=%s", u.Host)
 				http.Redirect(w, r, u.String(), http.StatusFound)
