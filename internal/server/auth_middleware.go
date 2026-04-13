@@ -29,7 +29,7 @@ func bearerAuthHandler(store *auth.Store, issuer *auth.TokenIssuer, next http.Ha
 			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
 			return
 		}
-		uid, _, err := issuer.ParseAccessToken(raw)
+		uid, _, sid, err := issuer.ParseAccessToken(raw)
 		if err != nil {
 			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "invalid or expired token")
 			return
@@ -44,6 +44,7 @@ func bearerAuthHandler(store *auth.Store, issuer *auth.TokenIssuer, next http.Ha
 			return
 		}
 		ctx := auth.ContextWithUser(r.Context(), user)
+		ctx = auth.ContextWithSessionID(ctx, sid)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

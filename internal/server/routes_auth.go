@@ -22,6 +22,16 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store
 	mux.HandleFunc("POST /api/v1/auth/google", func(w http.ResponseWriter, r *http.Request) {
 		handleAuthGoogle(w, r, cfg, store, issuer)
 	})
+	refresh := func(w http.ResponseWriter, r *http.Request) {
+		handleAuthRefresh(w, r, cfg, store, issuer)
+	}
+	mux.HandleFunc("POST /api/v1/auth/refresh", refresh)
+	mux.HandleFunc("POST /auth/refresh", refresh)
+	logout := func(w http.ResponseWriter, r *http.Request) {
+		handleAuthLogout(w, r, store)
+	}
+	mux.Handle("POST /api/v1/auth/logout", bearerAuthHandler(store, issuer, logout))
+	mux.Handle("POST /auth/logout", bearerAuthHandler(store, issuer, logout))
 	mux.Handle("GET /api/v1/me", bearerAuthHandler(store, issuer, handleAuthMe))
 
 	registerAppleWebAuthRoutes(mux, cfg, store, issuer)
@@ -61,10 +71,22 @@ type userPublic struct {
 }
 
 type authLoginResponse struct {
-	AccessToken string     `json:"accessToken"`
-	User        userPublic `json:"user"`
-	TokenType   string     `json:"tokenType,omitempty"`
-	ExpiresIn   int64      `json:"expiresIn,omitempty"`
+	AccessToken          string     `json:"accessToken"`
+	AccessTokenExpiresAt time.Time  `json:"accessTokenExpiresAt"`
+	RefreshToken         string     `json:"refreshToken,omitempty"`
+	User                 userPublic `json:"user"`
+	TokenType            string     `json:"tokenType,omitempty"`
+	ExpiresIn            int64      `json:"expiresIn,omitempty"`
+}
+
+type refreshTokenRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
+type refreshTokenResponse struct {
+	AccessToken          string    `json:"accessToken"`
+	AccessTokenExpiresAt time.Time `json:"accessTokenExpiresAt"`
+	RefreshToken         string    `json:"refreshToken"`
 }
 
 type meResponse struct {
@@ -166,7 +188,7 @@ func handleAuthApple(w http.ResponseWriter, r *http.Request, cfg config.Config, 
 			DisplayName:   req.MockClaims.DisplayName,
 			AvatarURL:     req.MockClaims.AvatarURL,
 		}
-		completeAuthLogin(w, r, store, issuer, "apple", in, source)
+		completeAuthLogin(w, r, cfg, store, issuer, "apple", in, source)
 		return
 	}
 
@@ -243,7 +265,7 @@ func handleAuthGoogle(w http.ResponseWriter, r *http.Request, cfg config.Config,
 			DisplayName:   req.MockClaims.DisplayName,
 			AvatarURL:     req.MockClaims.AvatarURL,
 		}
-		completeAuthLogin(w, r, store, issuer, "google", in, source)
+		completeAuthLogin(w, r, cfg, store, issuer, "google", in, source)
 		return
 	}
 
@@ -293,7 +315,7 @@ func handleAppleOIDC(
 		}
 	}
 
-	completeAuthLogin(w, r, store, issuer, "apple", in, source)
+	completeAuthLogin(w, r, cfg, store, issuer, "apple", in, source)
 }
 
 func handleGoogleOIDC(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, idToken string, source authRequestSource) {
@@ -316,7 +338,7 @@ func handleGoogleOIDC(w http.ResponseWriter, r *http.Request, cfg config.Config,
 	}
 	log.Printf("auth: request_id=%s provider=google source=%s google_sub=%s", rid, source, in.Sub)
 
-	completeAuthLogin(w, r, store, issuer, "google", in, source)
+	completeAuthLogin(w, r, cfg, store, issuer, "google", in, source)
 }
 
 func handleMockableAuth(
@@ -387,10 +409,10 @@ func handleMockableAuth(
 		AvatarURL:     mock.AvatarURL,
 	}
 
-	completeAuthLogin(w, r, store, issuer, provider, in, source)
+	completeAuthLogin(w, r, cfg, store, issuer, provider, in, source)
 }
 
-func completeAuthLogin(w http.ResponseWriter, r *http.Request, store *auth.Store, issuer *auth.TokenIssuer, provider string, in *auth.MockClaimsInput, source authRequestSource) {
+func completeAuthLogin(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, provider string, in *auth.MockClaimsInput, source authRequestSource) {
 	rid := requestIDFromContext(r.Context())
 	sub := strings.TrimSpace(in.Sub)
 
@@ -410,7 +432,7 @@ func completeAuthLogin(w http.ResponseWriter, r *http.Request, store *auth.Store
 		}
 		log.Printf("auth: request_id=%s provider=%s source=web action=user_found user_id=%s", rid, provider, user.ID.String())
 
-		access, err := issuer.IssueWebAccessToken(user.ID, provider)
+		access, accessExp, err := issuer.IssueWebAccessToken(user.ID, provider)
 		if err != nil {
 			log.Printf("auth: request_id=%s provider=%s source=web jwt_issue err=%v", rid, provider, err)
 			writeAPIError(w, http.StatusInternalServerError, "auth_failed", "could not issue access token")
@@ -421,10 +443,11 @@ func completeAuthLogin(w http.ResponseWriter, r *http.Request, store *auth.Store
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(authLoginResponse{
-			AccessToken: access,
-			User:        userPublicFromAuth(user),
-			TokenType:   auth.TokenTypeWeb,
-			ExpiresIn:   8 * 3600,
+			AccessToken:          access,
+			AccessTokenExpiresAt: accessExp.UTC(),
+			User:                 userPublicFromAuth(user),
+			TokenType:            auth.TokenTypeWeb,
+			ExpiresIn:            int64(cfg.AccessTokenTTL / time.Second),
 		})
 		return
 
@@ -448,21 +471,39 @@ func completeAuthLogin(w http.ResponseWriter, r *http.Request, store *auth.Store
 			return
 		}
 
-		access, err := issuer.IssueAccessToken(user.ID, provider)
+		rawRefresh, refreshHash, err := auth.GenerateRefreshToken()
 		if err != nil {
+			log.Printf("auth: request_id=%s provider=%s source=app refresh_generate err=%v", rid, provider, err)
+			writeAPIError(w, http.StatusInternalServerError, "auth_failed", "could not create session")
+			return
+		}
+		now := time.Now().UTC()
+		sessExpires := now.Add(cfg.RefreshSessionTTL)
+		sessID, err := store.InsertAuthSession(r.Context(), user.ID, provider, refreshHash, sessExpires, now)
+		if err != nil {
+			log.Printf("auth: request_id=%s provider=%s source=app session_insert err=%v", rid, provider, err)
+			writeAPIError(w, http.StatusInternalServerError, "auth_failed", "could not create session")
+			return
+		}
+
+		access, accessExp, err := issuer.IssueAccessToken(user.ID, provider, sessID)
+		if err != nil {
+			_ = store.DeleteAuthSession(r.Context(), sessID)
 			log.Printf("auth: request_id=%s provider=%s source=app jwt_issue err=%v", rid, provider, err)
 			writeAPIError(w, http.StatusInternalServerError, "auth_failed", "could not issue access token")
 			return
 		}
-		log.Printf("auth: request_id=%s provider=%s source=app user_id=%s token_type=app jwt_ok", rid, provider, user.ID.String())
+		log.Printf("auth: request_id=%s provider=%s source=app user_id=%s token_type=app jwt_ok session_id=%s", rid, provider, user.ID.String(), sessID.String())
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(authLoginResponse{
-			AccessToken: access,
-			User:        userPublicFromAuth(user),
-			TokenType:   auth.TokenTypeApp,
-			ExpiresIn:   24 * 3600,
+			AccessToken:          access,
+			AccessTokenExpiresAt: accessExp.UTC(),
+			RefreshToken:         rawRefresh,
+			User:                 userPublicFromAuth(user),
+			TokenType:            auth.TokenTypeApp,
+			ExpiresIn:            int64(cfg.AccessTokenTTL / time.Second),
 		})
 		return
 
@@ -470,6 +511,72 @@ func completeAuthLogin(w http.ResponseWriter, r *http.Request, store *auth.Store
 		log.Printf("auth: request_id=%s provider=%s reason=unsupported_source %q", rid, provider, source)
 		writeAPIError(w, http.StatusBadRequest, "invalid_source", "source must be app or web")
 	}
+}
+
+func handleAuthRefresh(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer) {
+	rid := requestIDFromContext(r.Context())
+	if r.Method != http.MethodPost {
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		return
+	}
+	ct := r.Header.Get("Content-Type")
+	if ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
+		writeAPIError(w, http.StatusUnsupportedMediaType, "invalid_request", "expected Content-Type: application/json")
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		log.Printf("auth: request_id=%s action=refresh body_read err=%v", rid, err)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "could not read body")
+		return
+	}
+	var req refreshTokenRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.RefreshToken) == "" {
+		writeAPIError(w, http.StatusBadRequest, "missing_refresh_token", "refreshToken is required")
+		return
+	}
+
+	out, err := store.RotateRefreshToken(r.Context(), strings.TrimSpace(req.RefreshToken), cfg.RefreshSessionTTL, issuer)
+	if err != nil {
+		st, code, msg := auth.RefreshErrorHTTP(err)
+		if st >= http.StatusInternalServerError {
+			log.Printf("auth: request_id=%s action=refresh err=%v", rid, err)
+		}
+		writeAPIError(w, st, code, msg)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(refreshTokenResponse{
+		AccessToken:          out.AccessToken,
+		AccessTokenExpiresAt: out.AccessTokenExpiresAt.UTC(),
+		RefreshToken:         out.RefreshToken,
+	})
+}
+
+func handleAuthLogout(w http.ResponseWriter, r *http.Request, store *auth.Store) {
+	rid := requestIDFromContext(r.Context())
+	sid, ok := auth.SessionIDFromContext(r.Context())
+	if !ok {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	u, okUser := auth.UserFromContext(r.Context())
+	if !okUser {
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing authentication context")
+		return
+	}
+	if err := store.RevokeSessionLogout(r.Context(), u.ID, sid, time.Now().UTC()); err != nil {
+		log.Printf("auth: request_id=%s action=logout err=%v", rid, err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not log out")
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func handleAuthMe(w http.ResponseWriter, r *http.Request) {

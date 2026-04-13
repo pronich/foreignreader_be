@@ -17,7 +17,7 @@ import (
 
 func New(cfg config.Config, tr *translate.Client, db *sql.DB) *http.Server {
 	store := auth.NewStore(db, cfg.FreeContextTranslationsPerMonth)
-	issuer, err := auth.NewTokenIssuer(cfg.JWTSecret)
+	issuer, err := auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTokenTTL)
 	if err != nil {
 		log.Fatalf("auth: %v", err)
 	}
