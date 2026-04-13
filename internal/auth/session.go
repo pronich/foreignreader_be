@@ -12,7 +12,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const revokeReasonRotated = "rotated"
+const (
+	revokeReasonRotated = "rotated"
+	revokeReasonLogout  = "logout"
+)
 
 // InsertAuthSession stores a new session; raw refresh token is never persisted.
 func (s *Store) InsertAuthSession(ctx context.Context, userID uuid.UUID, provider, refreshTokenHash string, refreshExpiresAt, now time.Time) (uuid.UUID, error) {
@@ -133,7 +136,7 @@ func (s *Store) RotateRefreshToken(
 		return nil, err
 	}
 
-	access, accessExp, err := issuer.IssueAccessToken(userID, provider)
+	access, accessExp, err := issuer.IssueAccessToken(userID, provider, newID)
 	if err != nil {
 		return nil, err
 	}
@@ -170,4 +173,20 @@ func RefreshErrorHTTP(err error) (status int, code, msg string) {
 	default:
 		return http.StatusInternalServerError, "internal_error", "could not refresh session"
 	}
+}
+
+// RevokeSessionLogout sets revoked_at and revoke_reason=logout for the session when still active.
+// Wrong user, missing row, or already revoked results in no update; the caller still treats it as success.
+func (s *Store) RevokeSessionLogout(ctx context.Context, userID, sessionID uuid.UUID, now time.Time) error {
+	if s.DB == nil {
+		return errors.New("database not configured")
+	}
+	_, err := s.DB.ExecContext(ctx, `
+		UPDATE auth_sessions
+		SET revoked_at = $3,
+		    revoke_reason = $4,
+		    updated_at = $3
+		WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+	`, sessionID, userID, now.UTC(), revokeReasonLogout)
+	return err
 }

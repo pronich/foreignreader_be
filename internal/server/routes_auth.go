@@ -27,6 +27,11 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store
 	}
 	mux.HandleFunc("POST /api/v1/auth/refresh", refresh)
 	mux.HandleFunc("POST /auth/refresh", refresh)
+	logout := func(w http.ResponseWriter, r *http.Request) {
+		handleAuthLogout(w, r, store)
+	}
+	mux.Handle("POST /api/v1/auth/logout", bearerAuthHandler(store, issuer, logout))
+	mux.Handle("POST /auth/logout", bearerAuthHandler(store, issuer, logout))
 	mux.Handle("GET /api/v1/me", bearerAuthHandler(store, issuer, handleAuthMe))
 
 	registerAppleWebAuthRoutes(mux, cfg, store, issuer)
@@ -481,7 +486,7 @@ func completeAuthLogin(w http.ResponseWriter, r *http.Request, cfg config.Config
 			return
 		}
 
-		access, accessExp, err := issuer.IssueAccessToken(user.ID, provider)
+		access, accessExp, err := issuer.IssueAccessToken(user.ID, provider, sessID)
 		if err != nil {
 			_ = store.DeleteAuthSession(r.Context(), sessID)
 			log.Printf("auth: request_id=%s provider=%s source=app jwt_issue err=%v", rid, provider, err)
@@ -552,6 +557,26 @@ func handleAuthRefresh(w http.ResponseWriter, r *http.Request, cfg config.Config
 		AccessTokenExpiresAt: out.AccessTokenExpiresAt.UTC(),
 		RefreshToken:         out.RefreshToken,
 	})
+}
+
+func handleAuthLogout(w http.ResponseWriter, r *http.Request, store *auth.Store) {
+	rid := requestIDFromContext(r.Context())
+	sid, ok := auth.SessionIDFromContext(r.Context())
+	if !ok {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	u, okUser := auth.UserFromContext(r.Context())
+	if !okUser {
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing authentication context")
+		return
+	}
+	if err := store.RevokeSessionLogout(r.Context(), u.ID, sid, time.Now().UTC()); err != nil {
+		log.Printf("auth: request_id=%s action=logout err=%v", rid, err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not log out")
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func handleAuthMe(w http.ResponseWriter, r *http.Request) {

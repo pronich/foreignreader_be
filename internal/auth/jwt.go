@@ -30,10 +30,12 @@ func NewTokenIssuer(secret string, accessTokenTTL time.Duration) (*TokenIssuer, 
 
 // AccessClaims is the payload for backend-issued access tokens.
 // Mobile app tokens omit token_type and channel (legacy shape). Web cabinet tokens set token_type=web and channel=web.
+// Sid is the auth_sessions row id for refresh-based app sessions; omitted for web-only tokens.
 type AccessClaims struct {
 	Provider   string `json:"provider"`
 	TokenType  string `json:"token_type,omitempty"`
 	Channel    string `json:"channel,omitempty"`
+	Sid        string `json:"sid,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -43,7 +45,8 @@ const (
 )
 
 // IssueAccessToken creates a signed JWT with subject = internal user id and provider claim (mobile app).
-func (t *TokenIssuer) IssueAccessToken(userID uuid.UUID, provider string) (token string, expiresAt time.Time, err error) {
+// sessionID is the auth_sessions id; use uuid.Nil for tokens without a refresh session.
+func (t *TokenIssuer) IssueAccessToken(userID uuid.UUID, provider string, sessionID uuid.UUID) (token string, expiresAt time.Time, err error) {
 	now := time.Now()
 	expiresAt = now.Add(t.accessTokenTTL).UTC()
 	claims := AccessClaims{
@@ -53,6 +56,9 @@ func (t *TokenIssuer) IssueAccessToken(userID uuid.UUID, provider string) (token
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 		},
+	}
+	if sessionID != uuid.Nil {
+		claims.Sid = sessionID.String()
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	s, err := tok.SignedString(t.secret)
@@ -84,8 +90,8 @@ func (t *TokenIssuer) IssueWebAccessToken(userID uuid.UUID, provider string) (to
 	return s, expiresAt, nil
 }
 
-// ParseAccessToken validates the token and returns internal user id and provider.
-func (t *TokenIssuer) ParseAccessToken(tokenString string) (userID uuid.UUID, provider string, err error) {
+// ParseAccessToken validates the token and returns internal user id, provider, and optional auth_sessions id (sid claim).
+func (t *TokenIssuer) ParseAccessToken(tokenString string) (userID uuid.UUID, provider string, sessionID uuid.UUID, err error) {
 	tok, err := jwt.ParseWithClaims(tokenString, &AccessClaims{}, func(token *jwt.Token) (any, error) {
 		if token.Method != jwt.SigningMethodHS256 {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -93,14 +99,14 @@ func (t *TokenIssuer) ParseAccessToken(tokenString string) (userID uuid.UUID, pr
 		return t.secret, nil
 	})
 	if err != nil || !tok.Valid {
-		return uuid.Nil, "", err
+		return uuid.Nil, "", uuid.Nil, err
 	}
 	claims, ok := tok.Claims.(*AccessClaims)
 	if !ok {
-		return uuid.Nil, "", errors.New("invalid claims type")
+		return uuid.Nil, "", uuid.Nil, errors.New("invalid claims type")
 	}
 	if strings.TrimSpace(claims.Subject) == "" || strings.TrimSpace(claims.Provider) == "" {
-		return uuid.Nil, "", errors.New("missing subject or provider")
+		return uuid.Nil, "", uuid.Nil, errors.New("missing subject or provider")
 	}
 	tt := strings.TrimSpace(claims.TokenType)
 	switch tt {
@@ -108,14 +114,21 @@ func (t *TokenIssuer) ParseAccessToken(tokenString string) (userID uuid.UUID, pr
 		// Legacy app tokens have no token_type; treat empty as app.
 	case TokenTypeWeb:
 		if strings.TrimSpace(claims.Channel) != TokenTypeWeb {
-			return uuid.Nil, "", errors.New("invalid web token channel")
+			return uuid.Nil, "", uuid.Nil, errors.New("invalid web token channel")
 		}
 	default:
-		return uuid.Nil, "", fmt.Errorf("unsupported token_type: %s", tt)
+		return uuid.Nil, "", uuid.Nil, fmt.Errorf("unsupported token_type: %s", tt)
 	}
 	uid, err := uuid.Parse(strings.TrimSpace(claims.Subject))
 	if err != nil {
-		return uuid.Nil, "", err
+		return uuid.Nil, "", uuid.Nil, err
 	}
-	return uid, strings.TrimSpace(claims.Provider), nil
+	var sid uuid.UUID
+	if s := strings.TrimSpace(claims.Sid); s != "" {
+		sid, err = uuid.Parse(s)
+		if err != nil {
+			return uuid.Nil, "", uuid.Nil, errors.New("invalid sid claim")
+		}
+	}
+	return uid, strings.TrimSpace(claims.Provider), sid, nil
 }
