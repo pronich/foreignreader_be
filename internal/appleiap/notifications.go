@@ -22,10 +22,10 @@ type NotificationPayload struct {
 }
 
 type NotificationData struct {
-	Environment          string `json:"environment,omitempty"` // Sandbox|Production
-	AppAppleID           int64  `json:"appAppleId,omitempty"`
-	BundleID             string `json:"bundleId,omitempty"`
-	BundleVersion        string `json:"bundleVersion,omitempty"`
+	Environment           string `json:"environment,omitempty"` // Sandbox|Production
+	AppAppleID            int64  `json:"appAppleId,omitempty"`
+	BundleID              string `json:"bundleId,omitempty"`
+	BundleVersion         string `json:"bundleVersion,omitempty"`
 	SignedTransactionInfo string `json:"signedTransactionInfo,omitempty"`
 	SignedRenewalInfo     string `json:"signedRenewalInfo,omitempty"`
 }
@@ -46,4 +46,3 @@ func VerifyAndDecodeNotification(signedPayload string) (*NotificationPayload, er
 	}
 	return &p, nil
 }
-

@@ -137,4 +137,3 @@ func appleTrustRoots() (*x509.CertPool, error) {
 	}
 	return roots, nil
 }
-

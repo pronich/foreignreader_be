@@ -12,10 +12,11 @@ import (
 
 	"foreignreader_be/internal/auth"
 	"foreignreader_be/internal/config"
+	"foreignreader_be/internal/rateus"
 	"google.golang.org/api/idtoken"
 )
 
-func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer) {
+func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, rateStore *rateus.Store) {
 	mux.HandleFunc("POST /api/v1/auth/apple", func(w http.ResponseWriter, r *http.Request) {
 		handleAuthApple(w, r, cfg, store, issuer)
 	})
@@ -32,7 +33,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store
 	}
 	mux.Handle("POST /api/v1/auth/logout", bearerAuthHandler(store, issuer, logout))
 	mux.Handle("POST /auth/logout", bearerAuthHandler(store, issuer, logout))
-	mux.Handle("GET /api/v1/me", bearerAuthHandler(store, issuer, handleAuthMe))
+	mux.Handle("GET /api/v1/me", bearerAuthHandler(store, issuer, handleAuthMe(rateStore)))
 
 	registerAppleWebAuthRoutes(mux, cfg, store, issuer)
 }
@@ -61,13 +62,13 @@ type googleAuthRequest struct {
 }
 
 type userPublic struct {
-	ID                      string     `json:"id"`
-	DisplayName             *string    `json:"displayName"`
-	AvatarURL               *string    `json:"avatarUrl"`
-	Email                   *string    `json:"email"`
-	EmailVerified           bool       `json:"emailVerified"`
-	AppStorefront           *string    `json:"appStorefront"`
-	AppStorefrontUpdatedAt  *time.Time `json:"appStorefrontUpdatedAt"`
+	ID                     string     `json:"id"`
+	DisplayName            *string    `json:"displayName"`
+	AvatarURL              *string    `json:"avatarUrl"`
+	Email                  *string    `json:"email"`
+	EmailVerified          bool       `json:"emailVerified"`
+	AppStorefront          *string    `json:"appStorefront"`
+	AppStorefrontUpdatedAt *time.Time `json:"appStorefrontUpdatedAt"`
 }
 
 type authLoginResponse struct {
@@ -90,7 +91,13 @@ type refreshTokenResponse struct {
 }
 
 type meResponse struct {
-	User userPublic `json:"user"`
+	User   userPublic    `json:"user"`
+	RateUs *rateUsPublic `json:"rateUs"`
+}
+
+type rateUsPublic struct {
+	LastAttemptAt         time.Time `json:"lastAttemptAt"`
+	LastAttemptAppVersion string    `json:"lastAttemptAppVersion"`
 }
 
 type authRequestSource string
@@ -579,15 +586,37 @@ func handleAuthLogout(w http.ResponseWriter, r *http.Request, store *auth.Store)
 	w.WriteHeader(http.StatusOK)
 }
 
-func handleAuthMe(w http.ResponseWriter, r *http.Request) {
-	u, ok := auth.UserFromContext(r.Context())
-	if !ok {
-		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing authentication context")
-		return
+func handleAuthMe(rateStore *rateus.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u, ok := auth.UserFromContext(r.Context())
+		if !ok {
+			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing authentication context")
+			return
+		}
+
+		var rateUsOut *rateUsPublic
+		if rateStore != nil {
+			st, err := rateStore.Get(r.Context(), u.ID)
+			if err != nil {
+				log.Printf("me: rate_us_state_load user_id=%s err=%v", u.ID, err)
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not load user profile")
+				return
+			}
+			if st != nil {
+				rateUsOut = &rateUsPublic{
+					LastAttemptAt:         st.LastAttemptAt.UTC(),
+					LastAttemptAppVersion: st.LastAttemptAppVersion,
+				}
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(meResponse{
+			User:   userPublicFromAuth(u),
+			RateUs: rateUsOut,
+		})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(meResponse{User: userPublicFromAuth(u)})
 }
 
 func userPublicFromAuth(u auth.User) userPublic {

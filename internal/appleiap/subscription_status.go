@@ -21,7 +21,7 @@ type SubscriptionStatusResponse struct {
 }
 
 type SubscriptionGroupStatus struct {
-	SubscriptionGroupIdentifier string                      `json:"subscriptionGroupIdentifier,omitempty"`
+	SubscriptionGroupIdentifier string                        `json:"subscriptionGroupIdentifier,omitempty"`
 	LastTransactions            []SubscriptionLastTransaction `json:"lastTransactions"`
 }
 

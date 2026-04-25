@@ -12,7 +12,7 @@ import (
 
 // TokenIssuer signs and verifies HS256 access tokens.
 type TokenIssuer struct {
-	secret        []byte
+	secret         []byte
 	accessTokenTTL time.Duration
 }
 
@@ -32,10 +32,10 @@ func NewTokenIssuer(secret string, accessTokenTTL time.Duration) (*TokenIssuer, 
 // Mobile app tokens omit token_type and channel (legacy shape). Web cabinet tokens set token_type=web and channel=web.
 // Sid is the auth_sessions row id for refresh-based app sessions; omitted for web-only tokens.
 type AccessClaims struct {
-	Provider   string `json:"provider"`
-	TokenType  string `json:"token_type,omitempty"`
-	Channel    string `json:"channel,omitempty"`
-	Sid        string `json:"sid,omitempty"`
+	Provider  string `json:"provider"`
+	TokenType string `json:"token_type,omitempty"`
+	Channel   string `json:"channel,omitempty"`
+	Sid       string `json:"sid,omitempty"`
 	jwt.RegisteredClaims
 }
 

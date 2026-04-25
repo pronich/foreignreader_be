@@ -318,4 +318,3 @@ func audienceMatches(tokenAud jwt.ClaimStrings, allowed []string) bool {
 	}
 	return false
 }
-

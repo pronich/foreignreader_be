@@ -44,7 +44,7 @@ type entitlementsListResponse struct {
 type effectiveAccessPublic struct {
 	IsPro        bool                `json:"isPro"`
 	Plan         string              `json:"plan"`
-	Source       string              `json:"source,omitempty"` // active Pro source when isPro (e.g. stripe, dev, apple_iap)
+	Source       string              `json:"source,omitempty"`    // active Pro source when isPro (e.g. stripe, dev, apple_iap)
 	ExpiresAt    *time.Time          `json:"expiresAt,omitempty"` // when Pro access ends, if known (e.g. billing period end)
 	ContextQuota *contextQuotaPublic `json:"contextQuota,omitempty"`
 }

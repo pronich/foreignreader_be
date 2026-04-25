@@ -45,14 +45,14 @@ func (s *Store) ProductCodeForAppleProductID(ctx context.Context, appleProductID
 
 type SubscriptionUpsert struct {
 	UserID                uuid.UUID
-	AppleProductID         string
-	ProductCode            string
-	OriginalTransactionID  string
-	LatestTransactionID    string
+	AppleProductID        string
+	ProductCode           string
+	OriginalTransactionID string
+	LatestTransactionID   string
 	Status                string
-	Environment            string
-	PurchasedAt            *time.Time
-	ExpiresAt              *time.Time
+	Environment           string
+	PurchasedAt           *time.Time
+	ExpiresAt             *time.Time
 }
 
 func (s *Store) UpsertSubscription(ctx context.Context, tx *sql.Tx, in SubscriptionUpsert) error {
@@ -91,14 +91,14 @@ func (s *Store) UpsertSubscription(ctx context.Context, tx *sql.Tx, in Subscript
 }
 
 type SubscriptionRow struct {
-	UserID             uuid.UUID
-	AppleProductID     string
-	ProductCode        string
+	UserID                uuid.UUID
+	AppleProductID        string
+	ProductCode           string
 	OriginalTransactionID string
 	LatestTransactionID   sql.NullString
-	Status             string
-	Environment        string
-	ExpiresAt          sql.NullTime
+	Status                string
+	Environment           string
+	ExpiresAt             sql.NullTime
 }
 
 func (s *Store) SubscriptionByOriginalTransactionID(ctx context.Context, tx *sql.Tx, originalTx string) (SubscriptionRow, error) {
@@ -172,11 +172,10 @@ func (s *Store) MarkAppleEventProcessed(ctx context.Context, tx *sql.Tx, notific
 }
 
 type AppleEventInsert struct {
-	NotificationUUID     string
-	NotificationType     string
-	Subtype              string
+	NotificationUUID      string
+	NotificationType      string
+	Subtype               string
 	OriginalTransactionID string
-	TransactionID        string
-	SignedPayload        string
+	TransactionID         string
+	SignedPayload         string
 }
-

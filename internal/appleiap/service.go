@@ -22,7 +22,7 @@ type Service struct {
 }
 
 var (
-	ErrNotEntitled    = errors.New("subscription not active")
+	ErrNotEntitled      = errors.New("subscription not active")
 	ErrUnknownProductID = errors.New("unknown apple product id")
 )
 
@@ -121,15 +121,15 @@ func (s *Service) ValidateTransaction(ctx context.Context, userID uuid.UUID, tra
 	}
 
 	if err := s.Store.UpsertSubscription(ctx, tx, SubscriptionUpsert{
-		UserID:               userID,
-		AppleProductID:       productID,
-		ProductCode:          productCode,
+		UserID:                userID,
+		AppleProductID:        productID,
+		ProductCode:           productCode,
 		OriginalTransactionID: origTx,
 		LatestTransactionID:   latestTx,
-		Status:               status,
-		Environment:          env,
-		PurchasedAt:          purchasedAt,
-		ExpiresAt:            expiresAt,
+		Status:                status,
+		Environment:           env,
+		PurchasedAt:           purchasedAt,
+		ExpiresAt:             expiresAt,
 	}); err != nil {
 		return nil, err
 	}
@@ -162,4 +162,3 @@ func (s *Service) ValidateTransaction(ctx context.Context, userID uuid.UUID, tra
 		Environment: env,
 	}, nil
 }
-

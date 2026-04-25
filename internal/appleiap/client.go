@@ -146,4 +146,3 @@ func (c *Client) GetTransactionInfo(ctx context.Context, transactionID string) (
 	}
 	return &out, nil
 }
-
