@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"foreignreader_be/internal/analytics"
 	"foreignreader_be/internal/auth"
 	"foreignreader_be/internal/config"
 	"foreignreader_be/internal/entitlement"
@@ -33,6 +34,9 @@ func New(cfg config.Config, tr *translate.Client, db *sql.DB) *http.Server {
 	rpSvc := readingposition.NewService(rpRepo)
 
 	rateStore := rateus.NewStore(db)
+	analyticsStore := analytics.NewStore(db)
+	analyticsIPWL := ratelimit.NewWindow()
+	analyticsAnonWL := ratelimit.NewWindow()
 
 	mux := http.NewServeMux()
 	registerOperationalRoutes(mux)
@@ -42,6 +46,7 @@ func New(cfg config.Config, tr *translate.Client, db *sql.DB) *http.Server {
 	registerUserRoutes(mux, store, issuer)
 	registerReadingPositionRoutes(mux, store, issuer, entStore, rpSvc)
 	registerRateUsRoutes(mux, store, issuer, rateStore)
+	registerAnalyticsRoutes(mux, cfg, store, issuer, analyticsStore, analyticsIPWL, analyticsAnonWL)
 
 	corsOrigins := newCORSOriginSet(cfg.CORSAllowedOrigins)
 	handler := chain(

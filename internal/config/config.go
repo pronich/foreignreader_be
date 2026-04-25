@@ -97,6 +97,11 @@ type Config struct {
 
 	// CORSAllowedOrigins lists allowed browser Origin values for /api/* (see CORS_ALLOWED_ORIGINS).
 	CORSAllowedOrigins []string
+
+	// AnalyticsEnabled controls whether analytics ingestion writes to the database.
+	AnalyticsEnabled bool
+	// AnalyticsIngestionKey is an optional shared key required by /api/v1/analytics/events.
+	AnalyticsIngestionKey string
 }
 
 func Load() Config {
@@ -200,6 +205,9 @@ func Load() Config {
 
 	corsAllowedOrigins := parseCORSAllowedOrigins(os.Getenv("CORS_ALLOWED_ORIGINS"))
 
+	analyticsEnabled := parseBoolEnv("ANALYTICS_ENABLED", true)
+	analyticsIngestionKey := strings.TrimSpace(os.Getenv("ANALYTICS_INGESTION_KEY"))
+
 	return Config{
 		Port:   port,
 		AppEnv: appEnv,
@@ -258,6 +266,9 @@ func Load() Config {
 		StripeRedirectURL:   stripeRedirectURL,
 
 		CORSAllowedOrigins: corsAllowedOrigins,
+
+		AnalyticsEnabled:      analyticsEnabled,
+		AnalyticsIngestionKey: analyticsIngestionKey,
 	}
 }
 
