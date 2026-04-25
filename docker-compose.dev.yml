@@ -81,6 +81,8 @@ services:
       STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET must be set}"
       STRIPE_PRICE_ID_PRO: "${STRIPE_PRICE_ID_PRO:?STRIPE_PRICE_ID_PRO must be set}"
       STRIPE_REDIRECT_URL: "${STRIPE_REDIRECT_URL:-https://foreignreader.io/cabinet}"
+      ANALYTICS_ENABLED: "${ANALYTICS_ENABLED:-true}"
+      ANALYTICS_INGESTION_KEY: "${ANALYTICS_INGESTION_KEY:-}"
     restart: unless-stopped
 
   nginx:
