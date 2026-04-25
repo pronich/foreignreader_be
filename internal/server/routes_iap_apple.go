@@ -126,4 +126,3 @@ func handleAppleIAPValidate(cfg config.Config, ent *entitlement.Store) http.Hand
 		_ = json.NewEncoder(w).Encode(out)
 	}
 }
-

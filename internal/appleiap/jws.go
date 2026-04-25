@@ -16,7 +16,7 @@ type TransactionPayload struct {
 	TransactionID         string `json:"transactionId"`
 	OriginalTransactionID string `json:"originalTransactionId"`
 	ProductID             string `json:"productId"`
-	PurchaseDate          int64  `json:"purchaseDate"`  // ms since epoch
+	PurchaseDate          int64  `json:"purchaseDate"` // ms since epoch
 	OriginalPurchaseDate  int64  `json:"originalPurchaseDate,omitempty"`
 	ExpiresDate           int64  `json:"expiresDate,omitempty"` // ms since epoch
 	Environment           string `json:"environment,omitempty"` // Sandbox|Production
@@ -62,4 +62,3 @@ func (p TransactionPayload) PurchasedAt() *time.Time {
 	t := time.UnixMilli(p.PurchaseDate).UTC()
 	return &t
 }
-

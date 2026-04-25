@@ -11,6 +11,7 @@ import (
 	"foreignreader_be/internal/entitlement"
 	"foreignreader_be/internal/onboardingsession"
 	"foreignreader_be/internal/ratelimit"
+	"foreignreader_be/internal/rateus"
 	"foreignreader_be/internal/readingposition"
 	"foreignreader_be/internal/translate"
 )
@@ -31,13 +32,16 @@ func New(cfg config.Config, tr *translate.Client, db *sql.DB) *http.Server {
 	rpRepo := readingposition.NewRepository(db)
 	rpSvc := readingposition.NewService(rpRepo)
 
+	rateStore := rateus.NewStore(db)
+
 	mux := http.NewServeMux()
 	registerOperationalRoutes(mux)
-	registerAuthRoutes(mux, cfg, store, issuer)
+	registerAuthRoutes(mux, cfg, store, issuer, rateStore)
 	registerEntitlementRoutes(mux, cfg, store, issuer, entStore)
 	registerAPIV1Routes(mux, cfg, tr, store, issuer, entStore, obStore, sessionWL, translateIPWL, translateTokWL)
 	registerUserRoutes(mux, store, issuer)
 	registerReadingPositionRoutes(mux, store, issuer, entStore, rpSvc)
+	registerRateUsRoutes(mux, store, issuer, rateStore)
 
 	corsOrigins := newCORSOriginSet(cfg.CORSAllowedOrigins)
 	handler := chain(

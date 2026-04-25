@@ -227,4 +227,3 @@ func deriveAppleSubscriptionState(notificationType, subtype string, txp appleiap
 		return "active", expiresAt
 	}
 }
-

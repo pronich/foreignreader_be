@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	mu       sync.RWMutex
+	mu        sync.RWMutex
 	stripeAPI *client.API
 )
 
