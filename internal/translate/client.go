@@ -36,11 +36,27 @@ func NewClient(apiKey, model, instructions string, timeout time.Duration) *Clien
 type llmOutput struct {
 	WordTranslation     string `json:"wordTranslation"`
 	SentenceTranslation string `json:"sentenceTranslation"`
+	Lemma               string `json:"lemma"`
+	LemmaTranslation    string `json:"lemmaTranslation"`
+	PartOfSpeech        string `json:"partOfSpeech"`
+	GrammarForm         string `json:"grammarForm"`
+	SourceExpression    string `json:"sourceExpression"`
 }
 
-func (c *Client) TranslateContext(ctx context.Context, sourceLanguage, targetLanguage, sentence, selectedWord string) (wordTranslation, sentenceTranslation string, err error) {
+// TranslationOutput is the result returned by TranslateContext.
+type TranslationOutput struct {
+	WordTranslation     string
+	SentenceTranslation string
+	Lemma               string
+	LemmaTranslation    string
+	PartOfSpeech        string
+	GrammarForm         string
+	SourceExpression    string // empty = not a phrasal verb
+}
+
+func (c *Client) TranslateContext(ctx context.Context, sourceLanguage, targetLanguage, sentence, selectedWord string) (TranslationOutput, error) {
 	if c.timeout <= 0 {
-		return "", "", errors.New("translate: timeout must be positive")
+		return TranslationOutput{}, errors.New("translate: timeout must be positive")
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -55,8 +71,13 @@ func (c *Client) TranslateContext(ctx context.Context, sourceLanguage, targetLan
 		"properties": map[string]any{
 			"wordTranslation":     map[string]any{"type": "string"},
 			"sentenceTranslation": map[string]any{"type": "string"},
+			"lemma":               map[string]any{"type": "string"},
+			"lemmaTranslation":    map[string]any{"type": "string"},
+			"partOfSpeech":        map[string]any{"type": "string"},
+			"grammarForm":         map[string]any{"type": "string"},
+			"sourceExpression":    map[string]any{"type": "string"},
 		},
-		"required":             []string{"wordTranslation", "sentenceTranslation"},
+		"required":             []string{"wordTranslation", "sentenceTranslation", "lemma", "lemmaTranslation", "partOfSpeech", "grammarForm", "sourceExpression"},
 		"additionalProperties": false,
 	}
 	jsonFmt := &responses.ResponseFormatTextJSONSchemaConfigParam{
@@ -76,22 +97,30 @@ func (c *Client) TranslateContext(ctx context.Context, sourceLanguage, targetLan
 		},
 	})
 	if err != nil {
-		return "", "", err
+		return TranslationOutput{}, err
 	}
 	if resp == nil {
-		return "", "", errors.New("empty response from OpenAI")
+		return TranslationOutput{}, errors.New("empty response from OpenAI")
 	}
 
 	raw := strings.TrimSpace(collectOutputText(resp))
 	if raw == "" {
-		return "", "", fmt.Errorf("%w: empty output text from model", ErrInvalidModelOutput)
+		return TranslationOutput{}, fmt.Errorf("%w: empty output text from model", ErrInvalidModelOutput)
 	}
 
-	word, sentence, err := parseTranslationJSON(raw)
+	out, err := parseTranslationJSON(raw)
 	if err != nil {
-		return "", "", err
+		return TranslationOutput{}, err
 	}
-	return word, sentence, nil
+	return TranslationOutput{
+		WordTranslation:     out.WordTranslation,
+		SentenceTranslation: out.SentenceTranslation,
+		Lemma:               out.Lemma,
+		LemmaTranslation:    out.LemmaTranslation,
+		PartOfSpeech:        out.PartOfSpeech,
+		GrammarForm:         out.GrammarForm,
+		SourceExpression:    out.SourceExpression,
+	}, nil
 }
 
 func collectOutputText(resp *responses.Response) string {
@@ -123,7 +152,7 @@ func collectOutputText(resp *responses.Response) string {
 	return strings.TrimSpace(b.String())
 }
 
-func parseTranslationJSON(raw string) (word, sentence string, err error) {
+func parseTranslationJSON(raw string) (llmOutput, error) {
 	jsonStr := extractJSONObject(raw)
 
 	var out llmOutput
@@ -131,35 +160,44 @@ func parseTranslationJSON(raw string) (word, sentence string, err error) {
 		out.WordTranslation = strings.TrimSpace(out.WordTranslation)
 		out.SentenceTranslation = strings.TrimSpace(out.SentenceTranslation)
 		if out.WordTranslation != "" && out.SentenceTranslation != "" {
-			return out.WordTranslation, out.SentenceTranslation, nil
+			return out, nil
 		}
 	}
 
-	type alt struct {
+	// Fallback: snake_case keys from older prompt versions.
+	type altSnake struct {
 		WordTranslation     string `json:"word_translation"`
 		SentenceTranslation string `json:"sentence_translation"`
 	}
-	var a alt
+	var a altSnake
 	if err := json.Unmarshal([]byte(jsonStr), &a); err == nil {
 		a.WordTranslation = strings.TrimSpace(a.WordTranslation)
 		a.SentenceTranslation = strings.TrimSpace(a.SentenceTranslation)
 		if a.WordTranslation != "" && a.SentenceTranslation != "" {
-			return a.WordTranslation, a.SentenceTranslation, nil
+			return llmOutput{WordTranslation: a.WordTranslation, SentenceTranslation: a.SentenceTranslation}, nil
 		}
 	}
 
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(jsonStr), &m); err != nil {
-		return "", "", fmt.Errorf("%w: %v", ErrInvalidModelOutput, err)
+		return llmOutput{}, fmt.Errorf("%w: %v", ErrInvalidModelOutput, err)
 	}
 	w := firstJSONString(m, "wordTranslation", "word_translation", "word")
 	s := firstJSONString(m, "sentenceTranslation", "sentence_translation", "sentence", "translation")
 	w = strings.TrimSpace(w)
 	s = strings.TrimSpace(s)
 	if w == "" || s == "" {
-		return "", "", fmt.Errorf("%w: missing translation fields after parse", ErrInvalidModelOutput)
+		return llmOutput{}, fmt.Errorf("%w: missing translation fields after parse", ErrInvalidModelOutput)
 	}
-	return w, s, nil
+	return llmOutput{
+		WordTranslation:     w,
+		SentenceTranslation: s,
+		Lemma:               strings.TrimSpace(firstJSONString(m, "lemma")),
+		LemmaTranslation:    strings.TrimSpace(firstJSONString(m, "lemmaTranslation", "lemma_translation")),
+		PartOfSpeech:        strings.TrimSpace(firstJSONString(m, "partOfSpeech", "part_of_speech")),
+		GrammarForm:         strings.TrimSpace(firstJSONString(m, "grammarForm", "grammar_form")),
+		SourceExpression:    strings.TrimSpace(firstJSONString(m, "sourceExpression", "source_expression")),
+	}, nil
 }
 
 func firstJSONString(m map[string]json.RawMessage, keys ...string) string {
