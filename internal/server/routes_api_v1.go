@@ -66,7 +66,7 @@ func registerAPIV1Routes(mux *http.ServeMux, cfg config.Config, tr *translate.Cl
 			}
 		}
 
-		word, sentence, runOK := translateContextRun(w, r, tr, req)
+		out, runOK := translateContextRun(w, r, tr, req)
 		if !runOK {
 			return
 		}
@@ -95,8 +95,13 @@ func registerAPIV1Routes(mux *http.ServeMux, cfg config.Config, tr *translate.Cl
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(translateContextResponse{
-			WordTranslation:     word,
-			SentenceTranslation: sentence,
+			WordTranslation:     out.WordTranslation,
+			SentenceTranslation: out.SentenceTranslation,
+			Lemma:               out.Lemma,
+			LemmaTranslation:    out.LemmaTranslation,
+			PartOfSpeech:        out.PartOfSpeech,
+			GrammarForm:         out.GrammarForm,
+			SourceExpression:    out.SourceExpression,
 			ContextQuota:        quota,
 		})
 	}
@@ -123,7 +128,7 @@ func registerAPIV1Routes(mux *http.ServeMux, cfg config.Config, tr *translate.Cl
 }
 
 func serveTranslateContext(w http.ResponseWriter, r *http.Request, tr *translate.Client, req translateContextRequest) {
-	word, sentence, ok := translateContextRun(w, r, tr, req)
+	out, ok := translateContextRun(w, r, tr, req)
 	if !ok {
 		return
 	}
@@ -132,25 +137,30 @@ func serveTranslateContext(w http.ResponseWriter, r *http.Request, tr *translate
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(translateContextResponse{
-		WordTranslation:     word,
-		SentenceTranslation: sentence,
+		WordTranslation:     out.WordTranslation,
+		SentenceTranslation: out.SentenceTranslation,
+		Lemma:               out.Lemma,
+		LemmaTranslation:    out.LemmaTranslation,
+		PartOfSpeech:        out.PartOfSpeech,
+		GrammarForm:         out.GrammarForm,
+		SourceExpression:    out.SourceExpression,
 	})
 }
 
 // translateContextRun validates input, calls the translation provider, and maps errors to HTTP responses.
-// On success it returns word, sentence, and ok=true (caller writes JSON). On failure it writes the response and returns ok=false.
-func translateContextRun(w http.ResponseWriter, r *http.Request, tr *translate.Client, req translateContextRequest) (word, sentence string, ok bool) {
+// On success it returns the full output and ok=true (caller writes JSON). On failure it writes the response and returns ok=false.
+func translateContextRun(w http.ResponseWriter, r *http.Request, tr *translate.Client, req translateContextRequest) (translate.TranslationOutput, bool) {
 	if strings.TrimSpace(req.SourceLanguage) == "" ||
 		strings.TrimSpace(req.TargetLanguage) == "" ||
 		strings.TrimSpace(req.Sentence) == "" ||
 		strings.TrimSpace(req.SelectedWord) == "" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "missing or empty required fields")
-		return "", "", false
+		return translate.TranslationOutput{}, false
 	}
 
 	rid := requestIDFromContext(r.Context())
 
-	word, sentence, err := tr.TranslateContext(
+	out, err := tr.TranslateContext(
 		r.Context(),
 		strings.TrimSpace(req.SourceLanguage),
 		strings.TrimSpace(req.TargetLanguage),
@@ -161,7 +171,7 @@ func translateContextRun(w http.ResponseWriter, r *http.Request, tr *translate.C
 		if errors.Is(err, translate.ErrInvalidModelOutput) {
 			log.Printf("translate/context: request_id=%s reason=invalid_model_output err=%v", rid, err)
 			writeAPIError(w, http.StatusInternalServerError, "invalid_model_output", "could not parse model response")
-			return "", "", false
+			return translate.TranslationOutput{}, false
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			reason := "context_deadline_exceeded"
@@ -170,7 +180,7 @@ func translateContextRun(w http.ResponseWriter, r *http.Request, tr *translate.C
 			}
 			log.Printf("translate/context: request_id=%s reason=%s", rid, reason)
 			writeAPIError(w, http.StatusBadGateway, "translation_failed", "translation request failed")
-			return "", "", false
+			return translate.TranslationOutput{}, false
 		}
 
 		var apiErr *oai.Error
@@ -179,15 +189,15 @@ func translateContextRun(w http.ResponseWriter, r *http.Request, tr *translate.C
 			clientStatus := mapOpenAIHTTPStatusToClient(apiErr.StatusCode)
 			code, msg := translateClientErrorCodeAndMessage(clientStatus)
 			writeAPIError(w, clientStatus, code, msg)
-			return "", "", false
+			return translate.TranslationOutput{}, false
 		}
 
 		log.Printf("translate/context: request_id=%s reason=upstream_error err=%v", rid, err)
 		writeAPIError(w, http.StatusBadGateway, "translation_failed", "translation request failed")
-		return "", "", false
+		return translate.TranslationOutput{}, false
 	}
 
-	return word, sentence, true
+	return out, true
 }
 
 type translateContextRequest struct {
@@ -200,6 +210,11 @@ type translateContextRequest struct {
 type translateContextResponse struct {
 	WordTranslation     string              `json:"wordTranslation"`
 	SentenceTranslation string              `json:"sentenceTranslation"`
+	Lemma               string              `json:"lemma,omitempty"`
+	LemmaTranslation    string              `json:"lemmaTranslation,omitempty"`
+	PartOfSpeech        string              `json:"partOfSpeech,omitempty"`
+	GrammarForm         string              `json:"grammarForm,omitempty"`
+	SourceExpression    string              `json:"sourceExpression,omitempty"`
 	ContextQuota        *contextQuotaPublic `json:"contextQuota,omitempty"`
 }
 
