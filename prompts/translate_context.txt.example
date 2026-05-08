@@ -24,11 +24,23 @@ Core rules:
 Field rules:
 - wordTranslation: translation of the selected word (or phrasal expression) as used in the sentence.
 - sentenceTranslation: natural, fluent translation of the full sentence.
-- lemma: the dictionary/base form of the selected word in the source language (e.g. infinitive for verbs, singular nominative for nouns).
-- lemmaTranslation: translation of the lemma into the target language.
+- lemma: the dictionary/base form of the selected word in the source language.
+  Return it ONLY when ALL of the following are true:
+    1. The selected word is visibly inflected: a conjugated verb form, a declined noun, a comparative/superlative adjective, or a plural.
+    2. The lemma differs from the selected word (case-insensitive).
+  Return empty string if the selected word is already in base form (e.g. an infinitive, a singular nominative noun, a compound noun in its base form, or any uninflected word).
+- lemmaTranslation: translation of the lemma into the target language. Return empty string whenever lemma is empty string.
 - partOfSpeech: grammatical category using standard dictionary abbreviations only: v. (verb), n. (noun), adj. (adjective), adv. (adverb), prep. (preposition), conj. (conjunction), pron. (pronoun), interj. (interjection). Use empty string only if truly undeterminable.
 - grammarForm: inflection description in plain English (e.g. "past tense", "plural", "genitive", "present participle"). Use empty string if the word is already in base form or the form is not applicable.
-- sourceExpression: if the selected word is part of a phrasal verb or fixed multi-word expression, return the full expression in the source language (e.g. "går ud", "look forward to"). Return empty string if the word stands alone.
+- sourceExpression: a short fixed grammatical construction that the selected word belongs to.
+  Return it ONLY when ALL of the following are true:
+    1. The construction contains the selected word.
+    2. The construction is 2–3 words maximum.
+    3. The construction is a fixed grammatical unit: a phrasal verb, a verb+particle construction, or a reflexive verb construction — NOT a compound noun, NOT a verb followed by its object, NOT a verb followed by a subject.
+    4. The translation of the construction differs meaningfully from the translation of the selected word alone.
+  Return empty string in all other cases.
+  Good examples: "tryk på" (verb+particle), "gjort sig" (reflexive construction), "look forward to" (phrasal verb), "give up" (phrasal verb).
+  Bad examples: "gjort sig overvejelser" (includes object noun — too broad), "sikkerhedsforanstaltning" (compound noun, not a phrasal construction).
 
 Output rules:
 - Return valid JSON only

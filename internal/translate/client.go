@@ -112,6 +112,7 @@ func (c *Client) TranslateContext(ctx context.Context, sourceLanguage, targetLan
 	if err != nil {
 		return TranslationOutput{}, err
 	}
+	sanitizeOutput(&out, selectedWord)
 	return TranslationOutput{
 		WordTranslation:     out.WordTranslation,
 		SentenceTranslation: out.SentenceTranslation,
@@ -198,6 +199,36 @@ func parseTranslationJSON(raw string) (llmOutput, error) {
 		GrammarForm:         strings.TrimSpace(firstJSONString(m, "grammarForm", "grammar_form")),
 		SourceExpression:    strings.TrimSpace(firstJSONString(m, "sourceExpression", "source_expression")),
 	}, nil
+}
+
+// sanitizeOutput enforces field-level validation rules after LLM parsing.
+// It clears fields that the LLM should have left empty but didn't.
+func sanitizeOutput(out *llmOutput, selectedWord string) {
+	selectedLower := strings.ToLower(strings.TrimSpace(selectedWord))
+
+	// sourceExpression: must contain selectedWord, be ≤3 words, differ from word alone
+	expr := strings.TrimSpace(out.SourceExpression)
+	if expr != "" {
+		exprLower := strings.ToLower(expr)
+		switch {
+		case !strings.Contains(exprLower, selectedLower):
+			out.SourceExpression = "" // doesn't contain the selected word
+		case len(strings.Fields(expr)) > 3:
+			out.SourceExpression = "" // too broad
+		case strings.EqualFold(expr, selectedWord):
+			out.SourceExpression = "" // identical to selected word — no value added
+		}
+	}
+
+	// lemma: must differ from selectedWord (case-insensitive)
+	if strings.EqualFold(strings.TrimSpace(out.Lemma), selectedLower) {
+		out.Lemma = ""
+		out.LemmaTranslation = ""
+	}
+	// if lemma ended up empty for any reason, clear its translation too
+	if strings.TrimSpace(out.Lemma) == "" {
+		out.LemmaTranslation = ""
+	}
 }
 
 func firstJSONString(m map[string]json.RawMessage, keys ...string) string {
