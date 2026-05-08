@@ -9,51 +9,187 @@ Given:
 
 Return a JSON object with the fields described below.
 
-Core rules:
-- The wordTranslation must reflect how the word is used in the sentence, even if it differs from the base dictionary form.
+Core semantic rules:
+- The wordTranslation must reflect the actual meaning conveyed in the sentence context.
 - Prefer contextual meaning over dictionary meaning.
-- If the selected word is part of a multi-word expression or fixed phrase, return the smallest complete expression needed to preserve the correct meaning.
-- If the correct meaning is expressed by a phrase, return that phrase rather than a single-word dictionary gloss.
-- Prefer the lexical base form of the correct contextual expression, not the inflected sentence fragment.
+- Preserve the meaning of the original sentence rather than translating word-by-word.
+- Keep the wordTranslation concise, natural, and semantically accurate.
 - Do not include unrelated surrounding words from the sentence.
-- Do not expand the wordTranslation into a larger part of the sentence than necessary.
+- Do not expand the wordTranslation into a larger sentence fragment than necessary.
 - Do not include subject words like "I", "he", "she", "it", etc.
 - The selected word translation must match the meaning used in the sentence, not all possible meanings.
-- Preserve the meaning of the original sentence rather than translating word-by-word.
+- If the selected word belongs to a larger grammatical construction, translate the meaning naturally rather than translating each component literally.
+- Do NOT translate grammatical particles, reflexive pronouns, or auxiliary components literally if they are not semantically meaningful in the target language.
+- sourceExpression is explanatory metadata only.
+- sourceExpression must NOT force literal expansion of wordTranslation.
+- wordTranslation should remain semantically natural and concise even when sourceExpression is present.
+
+Semantic shift rules:
+- When sourceExpression is returned, the combination of:
+  - wordTranslation
+  - sourceExpression
+
+  should help explain why the selected word has a contextual meaning different from its standalone dictionary meaning.
+
+- sourceExpression serves as a source-language explanation of the semantic shift.
+
+- The UI may display:
+  wordTranslation (sourceExpression)
+
+- Therefore sourceExpression should be useful for understanding the contextual meaning change.
+
+- sourceExpression may represent a larger semantic unit than the selected word alone.
 
 Field rules:
-- wordTranslation: translation of the selected word (or phrasal expression) as used in the sentence.
-- sentenceTranslation: natural, fluent translation of the full sentence.
-- lemma: the dictionary/base form of the selected word in the source language.
+
+- wordTranslation:
+  Translation of the selected word as used in the sentence context.
+
+  The translation may semantically correspond to a larger grammatical construction even when sourceExpression is returned separately.
+
+  Examples:
+    lyst → "want"
+    nødt → "must / have to"
+    gik → "went"
+    tryk → "pressure"
+
+- sentenceTranslation:
+  Natural, fluent translation of the full sentence.
+
+- lemma:
+  The dictionary/base form of the selected word in the source language.
+
   Return it ONLY when ALL of the following are true:
-    1. The selected word is visibly inflected: a conjugated verb form, a declined noun, a comparative/superlative adjective, or a plural.
-    2. The lemma differs from the selected word (case-insensitive).
-  Return empty string if the selected word is already in base form (e.g. an infinitive, a singular nominative noun, a compound noun in its base form, or any uninflected word).
-- lemmaTranslation: translation of the lemma into the target language. Return empty string whenever lemma is empty string.
-- partOfSpeech: grammatical category using standard dictionary abbreviations only: v. (verb), n. (noun), adj. (adjective), adv. (adverb), prep. (preposition), conj. (conjunction), pron. (pronoun), interj. (interjection). Use empty string only if truly undeterminable.
-- grammarForm: inflection description in plain English (e.g. "past tense", "plural", "genitive", "present participle"). Use empty string if the word is already in base form or the form is not applicable.
-- sourceExpression: a short fixed grammatical construction that the selected word belongs to.
+    1. The selected word is visibly inflected:
+       - a conjugated verb form
+       - a declined noun
+       - a comparative/superlative adjective
+       - or a plural
+    2. The lemma differs from the selected word (case-insensitive)
+
+  Return empty string if the selected word is already in base form:
+    - infinitive verbs
+    - singular nominative nouns
+    - compound nouns already in base form
+    - or any uninflected word
+
+  Rules by part of speech:
+    - verbs → infinitive
+    - nouns → indefinite singular
+    - adjectives → positive/base form
+
+  Examples:
+    gik → gå
+    bedre → god
+    husene → hus
+
+- lemmaTranslation:
+  Translation of the lemma into the target language.
+
+  Return empty string whenever lemma is empty string.
+
+- partOfSpeech:
+  Grammatical category using ONLY these standard abbreviations:
+
+    v.      = verb
+    n.      = noun
+    adj.    = adjective
+    adv.    = adverb
+    prep.   = preposition
+    conj.   = conjunction
+    pron.   = pronoun
+    interj. = interjection
+
+  Use empty string only if truly undeterminable.
+
+  partOfSpeech must primarily describe the selected word itself, even when sourceExpression is present.
+
+- grammarForm:
+  Grammatical form in plain English.
+
+  Always provide a value for:
+    - verbs
+    - nouns
+    - adjectives
+
+  Verb examples:
+    - infinitive
+    - present tense
+    - past tense
+    - present perfect
+    - present participle
+    - imperative
+
+  Noun examples:
+    - singular
+    - plural
+    - definite singular
+    - definite plural
+    - genitive singular
+
+  Adjective examples:
+    - positive
+    - comparative
+    - superlative
+
+  Use empty string only for:
+    - prepositions
+    - conjunctions
+    - particles
+    - pronouns
+    - interjections
+
+- sourceExpression:
+  A short grammatical or semantic construction that the selected word belongs to.
+
   Return it ONLY when ALL of the following are true:
     1. The construction contains the selected word.
-    2. The construction is 2–3 words maximum.
-    3. The construction is a fixed grammatical unit: a phrasal verb, a verb+particle construction, or a reflexive verb construction — NOT a compound noun, NOT a verb followed by its object, NOT a verb followed by a subject.
+    2. The construction is the smallest complete fixed grammatical or semantic unit required to explain the contextual meaning shift.
+    3. The construction is a fixed grammatical unit:
+       - phrasal verb
+       - verb+particle construction
+       - reflexive verb construction
+       - fixed semantic construction
     4. The translation of the construction differs meaningfully from the translation of the selected word alone.
+
   Return empty string in all other cases.
-  Good examples: "tryk på" (verb+particle), "gjort sig" (reflexive construction), "look forward to" (phrasal verb), "give up" (phrasal verb).
-  Bad examples: "gjort sig overvejelser" (includes object noun — too broad), "sikkerhedsforanstaltning" (compound noun, not a phrasal construction).
+
+  The construction should usually remain short and focused.
+
+  Avoid including:
+    - direct objects
+    - subjects
+    - unrelated modifiers
+    - full clauses
+
+  Good examples:
+    - "tryk på"
+    - "gjort sig"
+    - "har lyst til"
+    - "bliver nødt til"
+    - "give up"
+    - "look forward to"
+
+  Bad examples:
+    - "gjort sig overvejelser"
+    - "sikkerhedsforanstaltning"
+    - "tage bogen"
+    - "læse teksten"
 
 Output rules:
-- Return valid JSON only
-- Do not return markdown
-- Do not wrap the JSON in code fences
-- Do not add explanations
-- Do not add notes
-- Do not add alternative translations
-- All seven fields are always required; use empty string for fields that are not applicable
-- Keep the wordTranslation concise but accurate
-- Keep the sentenceTranslation natural and fluent
+- Return valid JSON only.
+- Do not return markdown.
+- Do not wrap the JSON in code fences.
+- Do not add explanations.
+- Do not add notes.
+- Do not add alternative translations.
+- All seven fields are always required.
+- Use empty string for fields that are not applicable.
+- Keep the wordTranslation concise but accurate.
+- Keep the sentenceTranslation natural and fluent.
 
 Required output shape:
+
 {
   "wordTranslation": "...",
   "sentenceTranslation": "...",
@@ -61,7 +197,9 @@ Required output shape:
   "lemmaTranslation": "...",
   "partOfSpeech": "...",
   "grammarForm": "...",
-  "sourceExpression": ""
+  "sourceExpression": "..."
 }
 
-If the input is ambiguous, choose the most likely meaning based on the sentence context and still return the same JSON shape.
+If the input is ambiguous:
+- choose the most likely meaning based on the sentence context
+- still return the same JSON shape
