@@ -33,6 +33,22 @@ type Entitlement struct {
 	UpdatedAt   time.Time
 }
 
+// IsOwner returns true when the user has an active entitlement with source = 'owner'.
+func (s *Store) IsOwner(ctx context.Context, userID uuid.UUID) (bool, error) {
+	var ok bool
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM entitlements
+			WHERE user_id = $1
+			  AND product_code = $2
+			  AND status = 'active'
+			  AND source = 'owner'
+		)
+	`, userID, ProductPro).Scan(&ok)
+	return ok, err
+}
+
 // HasActivePro returns true when the user has an active Pro entitlement per server rules.
 func (s *Store) HasActivePro(ctx context.Context, userID uuid.UUID) (bool, error) {
 	var ok bool

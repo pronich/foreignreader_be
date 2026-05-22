@@ -7,18 +7,20 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"foreignreader_be/internal/auth"
 	"foreignreader_be/internal/config"
+	"foreignreader_be/internal/entitlement"
 )
 
 // maxAppleWebCallbackBody caps POST body size for Apple's form_post callback (application/x-www-form-urlencoded).
 const maxAppleWebCallbackBody = 64 << 10 // 64 KiB; Apple sends a few KB
 
-func registerAppleWebAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer) {
-	h := handleAppleWebCallback(cfg, store, issuer)
+func registerAppleWebAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, entStore *entitlement.Store) {
+	h := handleAppleWebCallback(cfg, store, issuer, entStore)
 	// GET: response_mode=query. POST: response_mode=form_post (required when using Sign in with Apple JS with name/email scope).
 	mux.HandleFunc("GET /auth/apple/callback", h)
 	mux.HandleFunc("POST /auth/apple/callback", h)
@@ -41,7 +43,7 @@ func appleWebAuthorizationValues(r *http.Request, w http.ResponseWriter) (url.Va
 	}
 }
 
-func handleAppleWebCallback(cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer) http.HandlerFunc {
+func handleAppleWebCallback(cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, entStore *entitlement.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rid := requestIDFromContext(r.Context())
 		log.Printf("auth: request_id=%s provider=apple_web action=callback", rid)
@@ -154,12 +156,19 @@ func handleAppleWebCallback(cfg config.Config, store *auth.Store, issuer *auth.T
 		}
 		log.Printf("auth: request_id=%s provider=apple_web source=web user_id=%s token_type=web jwt_ok", rid, user.ID.String())
 
+		isOwner, err := entStore.IsOwner(r.Context(), user.ID)
+		if err != nil {
+			log.Printf("auth: request_id=%s provider=apple_web source=web owner_check err=%v", rid, err)
+			isOwner = false
+		}
+
 		resp := &authLoginResponse{
 			AccessToken:          access,
 			AccessTokenExpiresAt: accessExp.UTC(),
 			User:                 userPublicFromAuth(user),
 			TokenType:            auth.TokenTypeWeb,
 			ExpiresIn:            int64(cfg.AccessTokenTTL / time.Second),
+			IsOwner:              isOwner,
 		}
 		respondAppleWebCallback(w, r, cfg, resp, http.StatusOK, "", "")
 	}
@@ -176,6 +185,7 @@ func respondAppleWebCallback(w http.ResponseWriter, r *http.Request, cfg config.
 				q.Set("accessToken", success.AccessToken)
 				q.Set("tokenType", success.TokenType)
 				q.Set("userId", success.User.ID)
+				q.Set("isOwner", strconv.FormatBool(success.IsOwner))
 				if !success.AccessTokenExpiresAt.IsZero() {
 					q.Set("accessTokenExpiresAt", success.AccessTokenExpiresAt.UTC().Format(time.RFC3339))
 				}

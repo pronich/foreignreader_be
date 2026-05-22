@@ -40,7 +40,8 @@ func New(cfg config.Config, tr *translate.Client, db *sql.DB) *http.Server {
 
 	mux := http.NewServeMux()
 	registerOperationalRoutes(mux)
-	registerAuthRoutes(mux, cfg, store, issuer, rateStore)
+	registerAuthRoutes(mux, cfg, store, issuer, rateStore, entStore)
+	registerAdminRoutes(mux, store, issuer, entStore)
 	registerEntitlementRoutes(mux, cfg, store, issuer, entStore)
 	registerAPIV1Routes(mux, cfg, tr, store, issuer, entStore, obStore, sessionWL, translateIPWL, translateTokWL)
 	registerUserRoutes(mux, store, issuer)
