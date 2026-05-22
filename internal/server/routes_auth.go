@@ -12,16 +12,17 @@ import (
 
 	"foreignreader_be/internal/auth"
 	"foreignreader_be/internal/config"
+	"foreignreader_be/internal/entitlement"
 	"foreignreader_be/internal/rateus"
 	"google.golang.org/api/idtoken"
 )
 
-func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, rateStore *rateus.Store) {
+func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, rateStore *rateus.Store, entStore *entitlement.Store) {
 	mux.HandleFunc("POST /api/v1/auth/apple", func(w http.ResponseWriter, r *http.Request) {
-		handleAuthApple(w, r, cfg, store, issuer)
+		handleAuthApple(w, r, cfg, store, issuer, entStore)
 	})
 	mux.HandleFunc("POST /api/v1/auth/google", func(w http.ResponseWriter, r *http.Request) {
-		handleAuthGoogle(w, r, cfg, store, issuer)
+		handleAuthGoogle(w, r, cfg, store, issuer, entStore)
 	})
 	refresh := func(w http.ResponseWriter, r *http.Request) {
 		handleAuthRefresh(w, r, cfg, store, issuer)
@@ -33,9 +34,9 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, store *auth.Store
 	}
 	mux.Handle("POST /api/v1/auth/logout", bearerAuthHandler(store, issuer, logout))
 	mux.Handle("POST /auth/logout", bearerAuthHandler(store, issuer, logout))
-	mux.Handle("GET /api/v1/me", bearerAuthHandler(store, issuer, handleAuthMe(rateStore)))
+	mux.Handle("GET /api/v1/me", bearerAuthHandler(store, issuer, handleAuthMe(rateStore, entStore)))
 
-	registerAppleWebAuthRoutes(mux, cfg, store, issuer)
+	registerAppleWebAuthRoutes(mux, cfg, store, issuer, entStore)
 }
 
 type mockClaimsBody struct {
@@ -78,6 +79,7 @@ type authLoginResponse struct {
 	User                 userPublic `json:"user"`
 	TokenType            string     `json:"tokenType,omitempty"`
 	ExpiresIn            int64      `json:"expiresIn,omitempty"`
+	IsOwner              bool       `json:"isOwner"`
 }
 
 type refreshTokenRequest struct {
@@ -91,8 +93,9 @@ type refreshTokenResponse struct {
 }
 
 type meResponse struct {
-	User   userPublic    `json:"user"`
-	RateUs *rateUsPublic `json:"rateUs"`
+	User    userPublic    `json:"user"`
+	RateUs  *rateUsPublic `json:"rateUs"`
+	IsOwner bool          `json:"isOwner"`
 }
 
 type rateUsPublic struct {
@@ -136,7 +139,7 @@ func writeAuthSourceError(w http.ResponseWriter, err error) {
 	}
 }
 
-func handleAuthApple(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer) {
+func handleAuthApple(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, entStore *entitlement.Store) {
 	ct := r.Header.Get("Content-Type")
 	if ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
 		log.Printf("auth: request_id=%s provider=apple reason=unsupported_media_type content_type=%q",
@@ -195,7 +198,7 @@ func handleAuthApple(w http.ResponseWriter, r *http.Request, cfg config.Config, 
 			DisplayName:   req.MockClaims.DisplayName,
 			AvatarURL:     req.MockClaims.AvatarURL,
 		}
-		completeAuthLogin(w, r, cfg, store, issuer, "apple", in, source)
+		completeAuthLogin(w, r, cfg, store, issuer, entStore, "apple", in, source)
 		return
 	}
 
@@ -205,6 +208,7 @@ func handleAuthApple(w http.ResponseWriter, r *http.Request, cfg config.Config, 
 		cfg,
 		store,
 		issuer,
+		entStore,
 		strings.TrimSpace(req.IdentityToken),
 		req.Nonce,
 		req.Email,
@@ -213,7 +217,7 @@ func handleAuthApple(w http.ResponseWriter, r *http.Request, cfg config.Config, 
 	)
 }
 
-func handleAuthGoogle(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer) {
+func handleAuthGoogle(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, entStore *entitlement.Store) {
 	ct := r.Header.Get("Content-Type")
 	if ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
 		log.Printf("auth: request_id=%s provider=google reason=unsupported_media_type content_type=%q",
@@ -272,11 +276,11 @@ func handleAuthGoogle(w http.ResponseWriter, r *http.Request, cfg config.Config,
 			DisplayName:   req.MockClaims.DisplayName,
 			AvatarURL:     req.MockClaims.AvatarURL,
 		}
-		completeAuthLogin(w, r, cfg, store, issuer, "google", in, source)
+		completeAuthLogin(w, r, cfg, store, issuer, entStore, "google", in, source)
 		return
 	}
 
-	handleGoogleOIDC(w, r, cfg, store, issuer, strings.TrimSpace(req.IDToken), source)
+	handleGoogleOIDC(w, r, cfg, store, issuer, entStore, strings.TrimSpace(req.IDToken), source)
 }
 
 func handleAppleOIDC(
@@ -285,6 +289,7 @@ func handleAppleOIDC(
 	cfg config.Config,
 	store *auth.Store,
 	issuer *auth.TokenIssuer,
+	entStore *entitlement.Store,
 	identityToken string,
 	nonce *string,
 	email *string,
@@ -322,10 +327,10 @@ func handleAppleOIDC(
 		}
 	}
 
-	completeAuthLogin(w, r, cfg, store, issuer, "apple", in, source)
+	completeAuthLogin(w, r, cfg, store, issuer, entStore, "apple", in, source)
 }
 
-func handleGoogleOIDC(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, idToken string, source authRequestSource) {
+func handleGoogleOIDC(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, entStore *entitlement.Store, idToken string, source authRequestSource) {
 	rid := requestIDFromContext(r.Context())
 	log.Printf("auth: request_id=%s provider=google source=%s action=google_auth_received id_token_len=%d", rid, source, len(idToken))
 
@@ -345,7 +350,7 @@ func handleGoogleOIDC(w http.ResponseWriter, r *http.Request, cfg config.Config,
 	}
 	log.Printf("auth: request_id=%s provider=google source=%s google_sub=%s", rid, source, in.Sub)
 
-	completeAuthLogin(w, r, cfg, store, issuer, "google", in, source)
+	completeAuthLogin(w, r, cfg, store, issuer, entStore, "google", in, source)
 }
 
 func handleMockableAuth(
@@ -354,6 +359,7 @@ func handleMockableAuth(
 	cfg config.Config,
 	store *auth.Store,
 	issuer *auth.TokenIssuer,
+	entStore *entitlement.Store,
 	provider string,
 	tokenField string,
 	source authRequestSource,
@@ -416,10 +422,10 @@ func handleMockableAuth(
 		AvatarURL:     mock.AvatarURL,
 	}
 
-	completeAuthLogin(w, r, cfg, store, issuer, provider, in, source)
+	completeAuthLogin(w, r, cfg, store, issuer, entStore, provider, in, source)
 }
 
-func completeAuthLogin(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, provider string, in *auth.MockClaimsInput, source authRequestSource) {
+func completeAuthLogin(w http.ResponseWriter, r *http.Request, cfg config.Config, store *auth.Store, issuer *auth.TokenIssuer, entStore *entitlement.Store, provider string, in *auth.MockClaimsInput, source authRequestSource) {
 	rid := requestIDFromContext(r.Context())
 	sub := strings.TrimSpace(in.Sub)
 
@@ -447,6 +453,12 @@ func completeAuthLogin(w http.ResponseWriter, r *http.Request, cfg config.Config
 		}
 		log.Printf("auth: request_id=%s provider=%s source=web user_id=%s token_type=web jwt_ok", rid, provider, user.ID.String())
 
+		isOwner, err := entStore.IsOwner(r.Context(), user.ID)
+		if err != nil {
+			log.Printf("auth: request_id=%s provider=%s source=web owner_check err=%v", rid, provider, err)
+			isOwner = false
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(authLoginResponse{
@@ -455,6 +467,7 @@ func completeAuthLogin(w http.ResponseWriter, r *http.Request, cfg config.Config
 			User:                 userPublicFromAuth(user),
 			TokenType:            auth.TokenTypeWeb,
 			ExpiresIn:            int64(cfg.AccessTokenTTL / time.Second),
+			IsOwner:              isOwner,
 		})
 		return
 
@@ -586,7 +599,7 @@ func handleAuthLogout(w http.ResponseWriter, r *http.Request, store *auth.Store)
 	w.WriteHeader(http.StatusOK)
 }
 
-func handleAuthMe(rateStore *rateus.Store) http.HandlerFunc {
+func handleAuthMe(rateStore *rateus.Store, entStore *entitlement.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, ok := auth.UserFromContext(r.Context())
 		if !ok {
@@ -610,11 +623,18 @@ func handleAuthMe(rateStore *rateus.Store) http.HandlerFunc {
 			}
 		}
 
+		isOwner, err := entStore.IsOwner(r.Context(), u.ID)
+		if err != nil {
+			log.Printf("me: owner_check user_id=%s err=%v", u.ID, err)
+			isOwner = false
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(meResponse{
-			User:   userPublicFromAuth(u),
-			RateUs: rateUsOut,
+			User:    userPublicFromAuth(u),
+			RateUs:  rateUsOut,
+			IsOwner: isOwner,
 		})
 	}
 }
