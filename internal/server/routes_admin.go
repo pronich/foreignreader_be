@@ -99,6 +99,11 @@ func handleAdminMetrics(entStore *entitlement.Store) http.HandlerFunc {
 		db := entStore.DB
 		ctx := r.Context()
 		var m adminMetrics
+		m.DauSeries = make([]dauPoint, 0)
+		m.AuthAnon = make([]authAnonPoint, 0)
+		m.Platform = make([]platformPoint, 0)
+		m.Reading = make([]readingPoint, 0)
+		m.Translations = make([]transPoint, 0)
 
 		// Summary
 		if err := db.QueryRowContext(ctx, `
