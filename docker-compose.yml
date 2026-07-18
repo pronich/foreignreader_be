@@ -87,16 +87,28 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
+    # Explicit, stable name — the shared gateway-nginx (a different compose project) refers
+    # to this container by name on gateway_net; the default compose-generated name isn't
+    # something to rely on for that (and would collide with divebubble's own same-named
+    # `nginx` service on that shared network without this).
+    container_name: foreignreader-nginx
     depends_on:
       api:
         condition: service_healthy
-    # Internal only — the droplet's shared gateway-nginx (outside this repo) owns 80/443
-    # and Cloudflare Origin TLS, and reverse-proxies here in plain HTTP. See nginx/default.conf.
-    ports:
-      - "127.0.0.1:${NGINX_PORT:-9001}:80"
+    # No host port — the droplet's shared gateway-nginx (outside this repo, not git-tracked)
+    # owns 80/443 and Cloudflare Origin TLS, and reverse-proxies here in plain HTTP over the
+    # external gateway_net network (see nginx/default.conf and the `networks` block below).
+    # `default` is still needed too, since this is how nginx reaches `api` by service name.
+    networks:
+      - default
+      - gateway_net
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
+
+networks:
+  gateway_net:
+    external: true
 
 volumes:
   postgres_data:
