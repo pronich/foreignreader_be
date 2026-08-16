@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,8 @@ import (
 	"foreignreader_be/internal/appleiap"
 	"foreignreader_be/internal/config"
 	"foreignreader_be/internal/entitlement"
+
+	"github.com/google/uuid"
 )
 
 func handleAppleIAPWebhook(cfg config.Config, db *sql.DB, ent *entitlement.Store) http.HandlerFunc {
@@ -118,7 +121,6 @@ func handleAppleIAPWebhook(cfg config.Config, db *sql.DB, ent *entitlement.Store
 
 		subRow, err := store.SubscriptionByOriginalTransactionID(ctx, dbtx, origTx)
 		if errors.Is(err, sql.ErrNoRows) {
-			// Not validated/linked yet. Persisted for replay; no side effects.
 			log.Printf("iap/apple_webhook: request_id=%s action=no_subscription_row orig_tx=%s", rid, origTx)
 			_ = store.MarkAppleEventProcessed(ctx, dbtx, np.NotificationUUID)
 			if err := dbtx.Commit(); err != nil {
@@ -126,6 +128,11 @@ func handleAppleIAPWebhook(cfg config.Config, db *sql.DB, ent *entitlement.Store
 				writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not process webhook")
 				return
 			}
+			// No client-initiated /validate has linked this transaction to a user yet — normally
+			// because the app never made that call (crash, backgrounded purchase, dropped request).
+			// Self-heal using appAccountToken (set at purchase time on the client) so the sale isn't
+			// silently lost: re-verify server-to-server and create the subscription/entitlement here.
+			selfHealAppleTransactionByAccountToken(ctx, cfg, db, ent, rid, txID, txp.AppAccountToken)
 			writeWebhookOK(w)
 			return
 		}
@@ -176,6 +183,46 @@ func handleAppleIAPWebhook(cfg config.Config, db *sql.DB, ent *entitlement.Store
 
 		writeWebhookOK(w)
 	}
+}
+
+// selfHealAppleTransactionByAccountToken links an otherwise-orphaned Apple notification to its
+// user via appAccountToken, then runs it through the same server-to-server validation the
+// client's own /iap/apple/validate call would have. Best-effort: errors are logged, never
+// surfaced to Apple, since this is a fallback path and Apple's webhook must still get a 200.
+func selfHealAppleTransactionByAccountToken(ctx context.Context, cfg config.Config, db *sql.DB, ent *entitlement.Store, rid, transactionID, appAccountToken string) {
+	token := strings.TrimSpace(appAccountToken)
+	if token == "" || strings.TrimSpace(transactionID) == "" {
+		return
+	}
+	userID, err := uuid.Parse(token)
+	if err != nil {
+		log.Printf("iap/apple_webhook: request_id=%s action=self_heal_skipped reason=invalid_app_account_token", rid)
+		return
+	}
+	if !cfg.AppleIAPConfigured() {
+		return
+	}
+
+	env := appleiap.EnvProduction
+	if strings.EqualFold(strings.TrimSpace(cfg.AppleIAPEnvironment), "sandbox") {
+		env = appleiap.EnvSandbox
+	}
+	client, err := appleiap.NewClient(env, cfg.AppleIAPIssuerID, cfg.AppleIAPKeyID, cfg.AppleIAPBundleID, cfg.AppleIAPPrivateKey)
+	if err != nil {
+		log.Printf("iap/apple_webhook: request_id=%s action=self_heal_client_init_failed err=%v", rid, err)
+		return
+	}
+	svc, err := appleiap.NewService(client, appleiap.NewStore(db), ent, cfg.AppleIAPProProductID)
+	if err != nil {
+		log.Printf("iap/apple_webhook: request_id=%s action=self_heal_service_init_failed err=%v", rid, err)
+		return
+	}
+
+	if _, err := svc.ValidateTransaction(ctx, userID, transactionID); err != nil {
+		log.Printf("iap/apple_webhook: request_id=%s action=self_heal_failed user_id=%s err=%v", rid, userID, err)
+		return
+	}
+	log.Printf("iap/apple_webhook: request_id=%s action=self_heal_succeeded user_id=%s", rid, userID)
 }
 
 func deriveAppleEnv(np *appleiap.NotificationPayload, txp appleiap.TransactionPayload, cfg config.Config) string {

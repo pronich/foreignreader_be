@@ -21,6 +21,10 @@ type TransactionPayload struct {
 	ExpiresDate           int64  `json:"expiresDate,omitempty"` // ms since epoch
 	Environment           string `json:"environment,omitempty"` // Sandbox|Production
 	RevocationDate        int64  `json:"revocationDate,omitempty"`
+	// Set only if the client passed it as a StoreKit purchase option (appAccountToken).
+	// Lets the webhook self-link a transaction to a user when the client's own
+	// /iap/apple/validate call never arrives (crash, backgrounded purchase, dropped request).
+	AppAccountToken string `json:"appAccountToken,omitempty"`
 }
 
 func DecodeJWSPayload(jwsCompact string, out any) error {
